@@ -1,0 +1,1870 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import JsBarcode from "jsbarcode";
+import QRCode from "qrcode";
+import "./styles.css";
+
+const emptyCustomer = { name: "", phone: "", address: "", gstin: "", stateCode: "" };
+const emptyProduct = {
+  id: "",
+  name: "",
+  barcode: "",
+  sku: "",
+  category: "",
+  hsnCode: "",
+  gstRate: "18",
+  price: "",
+  stock: "",
+  imageUrl: "",
+  imageData: "",
+  removeImage: false,
+};
+const emptyManualItem = {
+  name: "",
+  barcode: "",
+  category: "",
+  hsnCode: "",
+  gstRate: "18",
+  qty: "1",
+  price: "",
+  discountMode: "percentage",
+  discountValue: "25",
+  saveToCatalog: false,
+  stock: "1",
+};
+
+function formattedAmount(value) {
+  return Number(value || 0).toLocaleString("en-IN", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: Number(value || 0) % 1 ? 2 : 0,
+  });
+}
+
+function money(value) {
+  return `₹${formattedAmount(value)}`;
+}
+
+function receiptMoney(value) {
+  return `₹${formattedAmount(value)}`;
+}
+
+function lineGross(item) {
+  return Math.max(0, Number(item.qty || 0) * Number(item.price || 0));
+}
+
+function lineDiscount(item) {
+  const gross = lineGross(item);
+  if (item.discountMode === "percentage") {
+    const percentage = Math.min(100, Math.max(0, Number(item.discountValue || 0)));
+    return gross * (percentage / 100);
+  }
+  if (item.discountMode === "fixed") {
+    return Math.min(gross, Math.max(0, Number(item.discountValue || 0)));
+  }
+  return Math.min(gross, Math.max(0, Number(item.discount || 0)));
+}
+
+function lineTotal(item) {
+  return Math.max(0, lineGross(item) - lineDiscount(item));
+}
+
+function lineTaxable(item) {
+  return lineTotal(item);
+}
+
+function invoiceLineValue(invoice, item) {
+  const taxable = Number(item.taxable || 0);
+  if (invoice.invoiceType === "gst") return Math.max(0, taxable + Number(item.gstAmount || 0));
+  if (taxable > 0) return taxable;
+  return Math.max(0, Number(item.qty || 0) * Number(item.price || 0) - Number(item.discount || 0));
+}
+
+function applyPrintPage(invoiceType) {
+  let style = document.getElementById("print-page-size");
+  if (!style) {
+    style = document.createElement("style");
+    style.id = "print-page-size";
+    document.head.appendChild(style);
+  }
+  style.textContent = invoiceType === "gst" ? "@page { size: A4; margin: 10mm; }" : "@page { size: 58mm auto; margin: 0; }";
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options,
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || "Request failed.");
+  }
+  return response.json();
+}
+
+function App() {
+  const [activeView, setActiveView] = useState("billing");
+  const [state, setState] = useState(null);
+  const [customer, setCustomer] = useState(emptyCustomer);
+  const [cart, setCart] = useState([]);
+  const [barcode, setBarcode] = useState("");
+  const [search, setSearch] = useState("");
+  const [invoiceType, setInvoiceType] = useState("regular");
+  const [gstType, setGstType] = useState("intrastate");
+  const [discountMode, setDiscountMode] = useState("fixed");
+  const [discountValue, setDiscountValue] = useState(0);
+  const [amountPaid, setAmountPaid] = useState(0);
+  const [paymentMode, setPaymentMode] = useState("Cash");
+  const [productForm, setProductForm] = useState(emptyProduct);
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogStockFilter, setCatalogStockFilter] = useState("all");
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [returnSearch, setReturnSearch] = useState("");
+  const [selectedReturnInvoiceId, setSelectedReturnInvoiceId] = useState("");
+  const [returnType, setReturnType] = useState("return");
+  const [returnQuantities, setReturnQuantities] = useState({});
+  const [returnReason, setReturnReason] = useState("");
+  const [settlementMode, setSettlementMode] = useState("Cash");
+  const [replacementSearch, setReplacementSearch] = useState("");
+  const [replacementItems, setReplacementItems] = useState([]);
+  const [lastInvoice, setLastInvoice] = useState(null);
+  const [lastReturn, setLastReturn] = useState(null);
+  const [notice, setNotice] = useState("");
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [manualItemOpen, setManualItemOpen] = useState(false);
+  const [manualItem, setManualItem] = useState(emptyManualItem);
+  const barcodeRef = useRef(null);
+  const cameraVideoRef = useRef(null);
+
+  useEffect(() => {
+    loadState();
+  }, []);
+
+  useEffect(() => {
+    if (!cameraOpen) return undefined;
+    let stream;
+    let cancelled = false;
+
+    async function startCamera() {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error("Camera access is not supported in this browser");
+        }
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false,
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        if (cameraVideoRef.current) {
+          cameraVideoRef.current.srcObject = stream;
+          await cameraVideoRef.current.play();
+          setCameraReady(true);
+        }
+      } catch (error) {
+        setCameraOpen(false);
+        showNotice(error.name === "NotAllowedError" ? "Camera permission was not granted" : error.message);
+      }
+    }
+
+    startCamera();
+    return () => {
+      cancelled = true;
+      setCameraReady(false);
+      stream?.getTracks().forEach((track) => track.stop());
+    };
+  }, [cameraOpen]);
+
+  async function loadState() {
+    const data = await api("/api/state");
+    setState(data);
+  }
+
+  function showNotice(message) {
+    setNotice(message);
+    window.setTimeout(() => setNotice(""), 2600);
+  }
+
+  const totals = useMemo(() => {
+    const gross = cart.reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.price || 0), 0);
+    const itemDiscount = cart.reduce((sum, item) => sum + lineDiscount(item), 0);
+    const discountBase = Math.max(0, gross - itemDiscount);
+    const billDiscount =
+      discountMode === "percentage"
+        ? discountBase * (Math.min(100, Math.max(0, Number(discountValue || 0))) / 100)
+        : Math.min(discountBase, Math.max(0, Number(discountValue || 0)));
+    const discount = itemDiscount + billDiscount;
+    const taxable = Math.max(0, gross - discount);
+    const cartTaxable = cart.reduce((sum, item) => sum + lineTaxable(item), 0);
+    const billDiscountRatio = cartTaxable > 0 ? billDiscount / cartTaxable : 0;
+    const tax =
+      invoiceType === "gst"
+        ? cart.reduce((sum, item) => sum + Math.max(0, lineTaxable(item) * (1 - billDiscountRatio)) * (Number(item.gstRate || 0) / 100), 0)
+        : 0;
+    const total = taxable + tax;
+    const paid = Number(amountPaid || 0);
+    return {
+      gross,
+      itemDiscount,
+      billDiscount,
+      discount,
+      discountMode,
+      discountValue: Number(discountValue || 0),
+      taxable,
+      tax,
+      total,
+      paid,
+      balance: Math.max(0, total - paid),
+    };
+  }, [cart, invoiceType, discountMode, discountValue, amountPaid]);
+
+  const todaySummary = useMemo(() => {
+    if (!state) return { count: 0, total: 0 };
+    const today = new Date().toISOString().slice(0, 10);
+    const invoices = state.invoices.filter((invoice) => invoice.date.startsWith(today));
+    return { count: invoices.length, total: invoices.reduce((sum, invoice) => sum + Number(invoice.totals.total || 0), 0) };
+  }, [state]);
+
+  const filteredProducts = useMemo(() => {
+    if (!state) return [];
+    const query = search.trim().toLowerCase();
+    if (!query) return state.products.slice(0, 8);
+    return state.products.filter((product) =>
+      [product.name, product.barcode, product.sku, product.category].join(" ").toLowerCase().includes(query)
+    );
+  }, [state, search]);
+
+  const catalogProducts = useMemo(() => {
+    if (!state) return [];
+    const query = catalogSearch.trim().toLowerCase();
+    return state.products
+      .filter((product) => {
+        const matchesSearch =
+          !query ||
+          [product.name, product.barcode, product.sku, product.category, product.hsnCode]
+            .join(" ")
+            .toLowerCase()
+            .includes(query);
+        const matchesStock =
+          catalogStockFilter === "all" ||
+          (catalogStockFilter === "in-stock" && Number(product.stock) > 0) ||
+          (catalogStockFilter === "out-of-stock" && Number(product.stock) <= 0);
+        return matchesSearch && matchesStock;
+      })
+      .sort((first, second) => first.name.localeCompare(second.name));
+  }, [state, catalogSearch, catalogStockFilter]);
+
+  const filteredCustomers = useMemo(() => {
+    if (!state) return [];
+    const query = customerSearch.trim().toLowerCase();
+    return state.customers.filter((item) => [item.name, item.phone, item.address].join(" ").toLowerCase().includes(query));
+  }, [state, customerSearch]);
+
+  const filteredInvoices = useMemo(() => {
+    if (!state) return [];
+    const query = invoiceSearch.trim().toLowerCase();
+    return state.invoices
+      .slice()
+      .reverse()
+      .filter((item) => [item.id, item.customer.name, item.customer.phone].join(" ").toLowerCase().includes(query));
+  }, [state, invoiceSearch]);
+
+  const returnInvoiceMatches = useMemo(() => {
+    if (!state) return [];
+    const query = returnSearch.trim().toLowerCase();
+    if (!query) return state.invoices.slice().reverse().slice(0, 8);
+    return state.invoices
+      .slice()
+      .reverse()
+      .filter((invoice) =>
+        [invoice.id, invoice.customer.name, invoice.customer.phone]
+          .join(" ")
+          .toLowerCase()
+          .includes(query)
+      )
+      .slice(0, 8);
+  }, [state, returnSearch]);
+
+  const selectedReturnInvoice = useMemo(
+    () => state?.invoices.find((invoice) => invoice.id === selectedReturnInvoiceId) || null,
+    [state, selectedReturnInvoiceId]
+  );
+
+  const returnCredit = useMemo(() => {
+    if (!selectedReturnInvoice || !state) return 0;
+    return selectedReturnInvoice.items.reduce((sum, item, itemIndex) => {
+      const qty = Math.max(0, Number(returnQuantities[itemIndex]) || 0);
+      const unitCredit = Number(item.qty || 0) > 0 ? invoiceLineValue(selectedReturnInvoice, item) / Number(item.qty) : 0;
+      return sum + unitCredit * qty;
+    }, 0);
+  }, [selectedReturnInvoice, returnQuantities, state]);
+
+  const replacementTotal = useMemo(
+    () => replacementItems.reduce((sum, item) => sum + lineTotal(item), 0),
+    [replacementItems]
+  );
+
+  const replacementMatches = useMemo(() => {
+    if (!state || !replacementSearch.trim()) return [];
+    const query = replacementSearch.trim().toLowerCase();
+    return state.products
+      .filter((product) =>
+        [product.name, product.barcode, product.sku]
+          .join(" ")
+          .toLowerCase()
+          .includes(query)
+      )
+      .slice(0, 6);
+  }, [state, replacementSearch]);
+
+  function addProductToCart(product) {
+    setCart((current) => {
+      const existing = current.find((item) => item.productId === product.id);
+      if (existing) {
+        return current.map((item) => (item.productId === product.id ? { ...item, qty: Number(item.qty) + 1 } : item));
+      }
+      return [
+        ...current,
+        {
+          productId: product.id,
+          name: product.name,
+          barcode: product.barcode,
+          hsnCode: product.hsnCode || "",
+          gstRate: Number(product.gstRate || 0),
+          imageUrl: product.imageUrl || "",
+          qty: 1,
+          price: Number(product.price || 0),
+          discount: 0,
+          discountMode: "percentage",
+          discountValue: 25,
+        },
+      ];
+    });
+    setSearch("");
+    setBarcode("");
+    barcodeRef.current?.focus();
+  }
+
+  function scanBarcode(event) {
+    event.preventDefault();
+    const code = barcode.trim();
+    if (!code || !state) return;
+    const product = state.products.find((item) => item.barcode === code || item.sku === code);
+    if (!product) {
+      showNotice(`No product found for barcode ${code}`);
+      return;
+    }
+    addProductToCart(product);
+  }
+
+  function updateCartItem(index, patch) {
+    setCart((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)));
+  }
+
+  function removeCartItem(index) {
+    setCart((current) => current.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  function availableReturnQty(invoice, itemIndex) {
+    const purchased = Number(invoice.items[itemIndex]?.qty || 0);
+    const returned = (state.returns || [])
+      .filter((record) => record.invoiceId === invoice.id)
+      .flatMap((record) => record.items)
+      .filter((item) => item.itemIndex === itemIndex)
+      .reduce((sum, item) => sum + Number(item.qty || 0), 0);
+    return Math.max(0, purchased - returned);
+  }
+
+  function selectReturnInvoice(invoice) {
+    setSelectedReturnInvoiceId(invoice.id);
+    setReturnQuantities({});
+    setReplacementItems([]);
+    setReturnReason("");
+    setReturnType("return");
+  }
+
+  function updateReturnQuantity(itemIndex, value) {
+    if (!selectedReturnInvoice) return;
+    const available = availableReturnQty(selectedReturnInvoice, itemIndex);
+    const qty = Math.min(available, Math.max(0, Number(value) || 0));
+    setReturnQuantities((current) => ({ ...current, [itemIndex]: qty }));
+  }
+
+  function addReplacementProduct(product) {
+    setReplacementItems((current) => {
+      const existing = current.find((item) => item.productId === product.id);
+      if (existing) {
+        return current.map((item) =>
+          item.productId === product.id ? { ...item, qty: Number(item.qty) + 1 } : item
+        );
+      }
+      return [
+        ...current,
+        {
+          productId: product.id,
+          name: product.name,
+          barcode: product.barcode,
+          imageUrl: product.imageUrl || "",
+          qty: 1,
+          price: Number(product.price || 0),
+          discountMode: "percentage",
+          discountValue: 25,
+          discount: 0,
+        },
+      ];
+    });
+    setReplacementSearch("");
+  }
+
+  function updateReplacementItem(index, patch) {
+    setReplacementItems((current) =>
+      current.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item))
+    );
+  }
+
+  function printReturnSlip(record) {
+    setLastInvoice(null);
+    setLastReturn({
+      ...record,
+      shop: {
+        ...(record.shop || state.settings),
+        receiptFooter: state.settings.receiptFooter,
+      },
+    });
+    applyPrintPage("regular");
+    window.setTimeout(() => window.print(), 100);
+  }
+
+  async function submitReturn(event) {
+    event.preventDefault();
+    if (!selectedReturnInvoice) return;
+    const items = selectedReturnInvoice.items
+      .map((item, itemIndex) => ({ itemIndex, qty: Number(returnQuantities[itemIndex]) || 0 }))
+      .filter((item) => item.qty > 0);
+    try {
+      const record = await api("/api/returns", {
+        method: "POST",
+        body: JSON.stringify({
+          invoiceId: selectedReturnInvoice.id,
+          type: returnType,
+          items,
+          replacements: replacementItems.map((item) => ({
+            productId: item.productId,
+            qty: item.qty,
+            discount: lineDiscount(item),
+          })),
+          reason: returnReason,
+          settlementMode,
+        }),
+      });
+      setSelectedReturnInvoiceId("");
+      setReturnQuantities({});
+      setReplacementItems([]);
+      setReturnSearch("");
+      await loadState();
+      showNotice(`${record.id} completed`);
+      printReturnSlip(record);
+    } catch (error) {
+      showNotice(error.message);
+    }
+  }
+
+  async function addManualItem(event) {
+    event.preventDefault();
+    const name = manualItem.name.trim();
+    const price = Math.max(0, Number(manualItem.price) || 0);
+    const qty = Math.max(1, Number(manualItem.qty) || 1);
+    if (!name || price <= 0) {
+      showNotice("Manual item name and price are required");
+      return;
+    }
+    if (manualItem.saveToCatalog && !manualItem.barcode.trim()) {
+      showNotice("Enter a barcode to save this product");
+      return;
+    }
+    if (invoiceType === "gst" && (!manualItem.hsnCode.trim() || Number(manualItem.gstRate || 0) <= 0)) {
+      showNotice("GST items need an HSN code and GST rate");
+      return;
+    }
+
+    try {
+      let product = {
+        id: `manual-${Date.now()}`,
+        name,
+        barcode: manualItem.barcode.trim(),
+        category: manualItem.category.trim(),
+        hsnCode: manualItem.hsnCode.trim(),
+        gstRate: Number(manualItem.gstRate || 0),
+        price,
+        imageUrl: "",
+      };
+      if (manualItem.saveToCatalog) {
+        product = await api("/api/products", {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            barcode: manualItem.barcode.trim(),
+            category: manualItem.category.trim(),
+            hsnCode: manualItem.hsnCode.trim(),
+            gstRate: Number(manualItem.gstRate || 0),
+            price,
+            stock: Math.max(0, Number(manualItem.stock) || 0),
+          }),
+        });
+        await loadState();
+      }
+      setCart((current) => [
+        ...current,
+        {
+          productId: product.id,
+          name: product.name,
+          barcode: product.barcode,
+          hsnCode: product.hsnCode || "",
+          gstRate: Number(product.gstRate || 0),
+          imageUrl: product.imageUrl || "",
+          qty,
+          price,
+          discount: 0,
+          discountMode: manualItem.discountMode,
+          discountValue: Math.max(0, Number(manualItem.discountValue) || 0),
+        },
+      ]);
+      setManualItem(emptyManualItem);
+      setManualItemOpen(false);
+      showNotice(manualItem.saveToCatalog ? "Product saved and added to bill" : "Manual item added to bill");
+    } catch (error) {
+      showNotice(error.message);
+    }
+  }
+
+  async function saveProduct(event) {
+    event.preventDefault();
+    const saved = await api("/api/products", {
+      method: "POST",
+      body: JSON.stringify(productForm),
+    });
+    setProductForm(emptyProduct);
+    await loadState();
+    showNotice(`${saved.name} saved`);
+  }
+
+  function selectProductImage(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      showNotice("Choose a PNG, JPEG, or WebP image");
+      event.target.value = "";
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      showNotice("Product image must be smaller than 5 MB");
+      event.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setProductForm((current) => ({ ...current, imageData: String(reader.result), removeImage: false }));
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function captureProductImage() {
+    const video = cameraVideoRef.current;
+    if (!video?.videoWidth || !video?.videoHeight) {
+      showNotice("Camera is still getting ready");
+      return;
+    }
+    const maxDimension = 1600;
+    const scale = Math.min(1, maxDimension / Math.max(video.videoWidth, video.videoHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+    const context = canvas.getContext("2d");
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const imageData = canvas.toDataURL("image/jpeg", 0.86);
+    setProductForm((current) => ({ ...current, imageData, removeImage: false }));
+    setCameraOpen(false);
+  }
+
+  async function deleteProduct(id) {
+    const confirmed = window.confirm("Delete this product from the catalog?");
+    if (!confirmed) return;
+    await api(`/api/products/${id}`, { method: "DELETE" });
+    await loadState();
+  }
+
+  async function saveSettings(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await api("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify(Object.fromEntries(form.entries())),
+    });
+    await loadState();
+    showNotice("Shop settings saved");
+  }
+
+  async function generateBill(event) {
+    event.preventDefault();
+    if (!customer.name.trim()) {
+      showNotice("Customer name is required");
+      return;
+    }
+    if (!cart.length) {
+      showNotice("Add a product by barcode scan or search");
+      return;
+    }
+    if (invoiceType === "gst" && (!state.settings.firmName?.trim() || !(state.settings.firmGstin || state.settings.shopGstin)?.trim())) {
+      showNotice("Configure the legal firm name and GSTIN in Settings");
+      return;
+    }
+    if (invoiceType === "gst" && cart.some((item) => !item.hsnCode || Number(item.gstRate || 0) <= 0)) {
+      showNotice("Every GST item needs an HSN code and GST rate");
+      return;
+    }
+    const cartTaxable = cart.reduce((sum, item) => sum + lineTaxable(item), 0);
+    const billDiscountRatio = cartTaxable > 0 ? totals.billDiscount / cartTaxable : 0;
+    const invoice = await api("/api/invoices", {
+      method: "POST",
+      body: JSON.stringify({
+        customer,
+        items: cart.map((item) => {
+          const taxable = Math.max(0, lineTaxable(item) * (1 - billDiscountRatio));
+          return {
+            ...item,
+            discount: lineDiscount(item),
+            taxable,
+            gstAmount: invoiceType === "gst" ? taxable * (Number(item.gstRate || 0) / 100) : 0,
+          };
+        }),
+        totals,
+        paymentMode,
+        invoiceType,
+        gstType,
+      }),
+    });
+    setLastReturn(null);
+    setLastInvoice(invoice);
+    applyPrintPage(invoice.invoiceType);
+    setCustomer(emptyCustomer);
+    setCart([]);
+    setAmountPaid(0);
+    setDiscountMode("fixed");
+    setDiscountValue(0);
+    await loadState();
+    window.setTimeout(() => window.print(), 100);
+  }
+
+  async function clearRecords() {
+    const confirmed = window.confirm("Clear all saved customers and invoices? Products will remain.");
+    if (!confirmed) return;
+    await api("/api/clear-records", { method: "POST", body: "{}" });
+    await loadState();
+    showNotice("Customer and invoice records cleared");
+  }
+
+  if (!state) {
+    return <main className="loading-screen">Loading Alter Billing...</main>;
+  }
+
+  const viewTitle = {
+    billing: "Counter billing",
+    products: "Product barcodes",
+    customers: "Customers",
+    history: "Sales history",
+    returns: "Returns and exchanges",
+    settings: "Settings",
+  }[activeView];
+
+  return (
+    <>
+      <main className="app-shell">
+        <aside className="sidebar">
+          <div className="brand-lockup">
+            <img src="/alter-logo-white.png" alt="Alter" />
+            <span>Billing Desk</span>
+          </div>
+          <nav className="nav-tabs" aria-label="Main sections">
+            {[
+              ["billing", "Bill"],
+              ["products", "Products"],
+              ["customers", "Customers"],
+              ["history", "Sales"],
+              ["returns", "Returns"],
+              ["settings", "Settings"],
+            ].map(([key, label]) => (
+              <button key={key} className={activeView === key ? "active" : ""} onClick={() => setActiveView(key)} type="button">
+                {label}
+              </button>
+            ))}
+          </nav>
+          <section className="today-panel">
+            <span>Today</span>
+            <strong>{money(todaySummary.total)}</strong>
+            <small>{todaySummary.count} bills generated</small>
+          </section>
+        </aside>
+
+        <section className="workspace">
+          <header className="topbar">
+            <div>
+              <p>Alter bags and accessories</p>
+              <h1>{viewTitle}</h1>
+            </div>
+            <div className="status-pill">{notice || `${state.products.length} products ready`}</div>
+          </header>
+
+          {activeView === "billing" && (
+            <form className="billing-grid" onSubmit={generateBill}>
+              <section className="panel scan-panel">
+                <div className="panel-title">
+                  <h2>Scan or search</h2>
+                  <div className="panel-actions">
+                    <button className="secondary-button" type="button" onClick={() => setManualItemOpen(true)}>
+                      Manual item
+                    </button>
+                    <button className="quiet-button" type="button" onClick={() => barcodeRef.current?.focus()}>
+                      Focus scanner
+                    </button>
+                  </div>
+                </div>
+                <div className="invoice-mode">
+                  <span>Invoice type</span>
+                  <div className="segmented-control">
+                    <button className={invoiceType === "regular" ? "active" : ""} type="button" onClick={() => setInvoiceType("regular")}>
+                      Regular
+                    </button>
+                    <button className={invoiceType === "gst" ? "active" : ""} type="button" onClick={() => setInvoiceType("gst")}>
+                      GST invoice
+                    </button>
+                  </div>
+                  {invoiceType === "gst" && (
+                    <select aria-label="GST supply type" value={gstType} onChange={(event) => setGstType(event.target.value)}>
+                      <option value="intrastate">Within state (CGST + SGST)</option>
+                      <option value="interstate">Other state (IGST)</option>
+                    </select>
+                  )}
+                </div>
+                <div className="scan-layout">
+                  <label>
+                    Barcode scanner
+                    <div className="barcode-form">
+                      <input
+                        ref={barcodeRef}
+                        value={barcode}
+                        onChange={(event) => setBarcode(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") scanBarcode(event);
+                        }}
+                        placeholder="Scan barcode and press Enter"
+                        autoFocus
+                      />
+                      <button type="button" onClick={scanBarcode}>Add</button>
+                    </div>
+                  </label>
+                  <label>
+                    Product search
+                    <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by name, SKU, barcode" />
+                  </label>
+                </div>
+                <div className="product-results">
+                  {filteredProducts.map((product) => (
+                    <button key={product.id} className="product-result" type="button" onClick={() => addProductToCart(product)}>
+                      <ProductImage product={product} />
+                      <span className="product-result-copy">
+                        <strong>{product.name}</strong>
+                        <small>{product.barcode} · Stock {product.stock}</small>
+                      </span>
+                      <b>{money(product.price)}</b>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="panel customer-panel">
+                <div className="panel-title">
+                  <h2>Customer</h2>
+                </div>
+                <div className="field-grid">
+                  <label>
+                    Name
+                    <input value={customer.name} onChange={(event) => setCustomer({ ...customer, name: event.target.value })} required />
+                  </label>
+                  <label>
+                    Phone
+                    <input value={customer.phone} onChange={(event) => setCustomer({ ...customer, phone: event.target.value })} />
+                  </label>
+                  <label className="wide-field">
+                    Address
+                    <textarea rows="2" value={customer.address} onChange={(event) => setCustomer({ ...customer, address: event.target.value })} />
+                  </label>
+                  {invoiceType === "gst" && (
+                    <>
+                      <label>
+                        Customer GSTIN
+                        <input value={customer.gstin} onChange={(event) => setCustomer({ ...customer, gstin: event.target.value.toUpperCase() })} />
+                      </label>
+                      <label>
+                        State code
+                        <input maxLength="2" value={customer.stateCode} onChange={(event) => setCustomer({ ...customer, stateCode: event.target.value })} />
+                      </label>
+                    </>
+                  )}
+                </div>
+              </section>
+
+              <section className="panel cart-panel">
+                <div className="panel-title">
+                  <h2>Bill items</h2>
+                  <span>{cart.length} lines</span>
+                </div>
+                <div className="cart-table">
+                  <div className="cart-head">
+                    <span>Product</span>
+                    <span>Qty</span>
+                    <span>Price</span>
+                    <span>Discount</span>
+                    <span>Total</span>
+                    <span></span>
+                  </div>
+                  {cart.length ? (
+                    cart.map((item, index) => (
+                      <div className="cart-row" key={`${item.productId}-${index}`}>
+                        <div className="cart-product">
+                          <ProductImage product={item} compact />
+                          <span>
+                            <strong>{item.name}</strong>
+                            <small>{item.barcode}</small>
+                          </span>
+                        </div>
+                        <input min="1" type="number" value={item.qty} onChange={(event) => updateCartItem(index, { qty: Number(event.target.value) })} />
+                        <input min="0" type="number" value={item.price} onChange={(event) => updateCartItem(index, { price: Number(event.target.value) })} />
+                        <div className="line-discount-control">
+                          <select
+                            aria-label={`${item.name} discount type`}
+                            value={item.discountMode}
+                            onChange={(event) => updateCartItem(index, { discountMode: event.target.value })}
+                          >
+                            <option value="percentage">%</option>
+                            <option value="fixed">₹</option>
+                          </select>
+                          <input
+                            aria-label={`${item.name} discount value`}
+                            min="0"
+                            max={item.discountMode === "percentage" ? "100" : undefined}
+                            step="0.01"
+                            type="number"
+                            value={item.discountValue}
+                            onChange={(event) => updateCartItem(index, { discountValue: Number(event.target.value) })}
+                          />
+                        </div>
+                        <strong>{money(lineTotal(item))}</strong>
+                        <button type="button" onClick={() => removeCartItem(index)}>
+                          x
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="empty-state">Scan a barcode or choose a product to start the bill.</div>
+                  )}
+                </div>
+              </section>
+
+              <section className="panel totals-panel">
+                <div className="panel-title">
+                  <h2>Payment</h2>
+                  <span>{state.settings.invoicePrefix}-{String(state.invoices.length + 1).padStart(5, "0")}</span>
+                </div>
+                <div className="field-grid compact">
+                  <label>
+                    Bill discount type
+                    <select value={discountMode} onChange={(event) => setDiscountMode(event.target.value)}>
+                      <option value="fixed">Fixed amount</option>
+                      <option value="percentage">Percentage</option>
+                    </select>
+                  </label>
+                  <label>
+                    {discountMode === "percentage" ? "Additional discount %" : "Additional discount amount"}
+                    <input
+                      min="0"
+                      max={discountMode === "percentage" ? "100" : undefined}
+                      step="0.01"
+                      type="number"
+                      value={discountValue}
+                      onChange={(event) => setDiscountValue(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Payment
+                    <select value={paymentMode} onChange={(event) => setPaymentMode(event.target.value)}>
+                      <option>Cash</option>
+                      <option>UPI</option>
+                      <option>Card</option>
+                      <option>Mixed</option>
+                    </select>
+                  </label>
+                  <label>
+                    Paid
+                    <input min="0" step="0.01" type="number" value={amountPaid} onChange={(event) => setAmountPaid(event.target.value)} />
+                  </label>
+                </div>
+                <Totals totals={totals} invoiceType={invoiceType} gstType={gstType} />
+                <button className="primary-button" type="submit">
+                  {invoiceType === "gst" ? "Generate A4 GST invoice" : "Generate 2 inch bill"}
+                </button>
+              </section>
+            </form>
+          )}
+
+          {activeView === "products" && (
+            <section className="catalog-grid">
+              <form className="panel" onSubmit={saveProduct}>
+                <div className="panel-title">
+                  <h2>{productForm.id ? "Edit product" : "Add product"}</h2>
+                  <button className="quiet-button" type="button" onClick={() => setProductForm(emptyProduct)}>
+                    Clear
+                  </button>
+                </div>
+                <div className="field-grid">
+                  <div className="product-image-editor wide-field">
+                    <div className="product-image-preview">
+                      {productForm.imageData || (productForm.imageUrl && !productForm.removeImage) ? (
+                        <img src={productForm.imageData || productForm.imageUrl} alt={`${productForm.name || "Product"} preview`} />
+                      ) : (
+                        <span>No image</span>
+                      )}
+                    </div>
+                    <div className="product-image-actions">
+                      <div className="image-source-actions">
+                        <button className="secondary-button" type="button" onClick={() => setCameraOpen(true)}>
+                          Take photo
+                        </button>
+                        <label className="upload-image-button">
+                          Upload image
+                          <input
+                            key={`${productForm.id}-${productForm.imageData ? "selected" : "empty"}`}
+                            accept="image/png,image/jpeg,image/webp"
+                            type="file"
+                            onChange={selectProductImage}
+                          />
+                        </label>
+                      </div>
+                      <small className="image-help">
+                        PNG, JPEG, or WebP. Maximum 5 MB.
+                      </small>
+                      {(productForm.imageData || productForm.imageUrl) && !productForm.removeImage && (
+                        <button
+                          className="quiet-danger"
+                          type="button"
+                          onClick={() => setProductForm({ ...productForm, imageData: "", imageUrl: productForm.imageUrl, removeImage: true })}
+                        >
+                          Remove image
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <label>
+                    Product name
+                    <input value={productForm.name} onChange={(event) => setProductForm({ ...productForm, name: event.target.value })} required />
+                  </label>
+                  <label>
+                    Barcode
+                    <input value={productForm.barcode} onChange={(event) => setProductForm({ ...productForm, barcode: event.target.value })} required />
+                  </label>
+                  <label>
+                    SKU
+                    <input value={productForm.sku} onChange={(event) => setProductForm({ ...productForm, sku: event.target.value })} />
+                  </label>
+                  <label>
+                    Category
+                    <input value={productForm.category} onChange={(event) => setProductForm({ ...productForm, category: event.target.value })} />
+                  </label>
+                  <label>
+                    HSN code
+                    <input value={productForm.hsnCode || ""} onChange={(event) => setProductForm({ ...productForm, hsnCode: event.target.value })} />
+                  </label>
+                  <label>
+                    GST rate %
+                    <input min="0" step="0.01" type="number" value={productForm.gstRate ?? ""} onChange={(event) => setProductForm({ ...productForm, gstRate: event.target.value })} />
+                  </label>
+                  <label>
+                    Price
+                    <input min="0" type="number" value={productForm.price} onChange={(event) => setProductForm({ ...productForm, price: event.target.value })} required />
+                  </label>
+                  <label>
+                    Stock
+                    <input min="0" type="number" value={productForm.stock} onChange={(event) => setProductForm({ ...productForm, stock: event.target.value })} />
+                  </label>
+                </div>
+                <button className="primary-button" type="submit">
+                  Save product
+                </button>
+              </form>
+              <section className="panel product-list-panel">
+                <div className="catalog-list-heading">
+                  <div>
+                    <h2>Product list</h2>
+                    <span>{catalogProducts.length} of {state.products.length} items</span>
+                  </div>
+                </div>
+                <div className="catalog-toolbar">
+                  <label className="catalog-search">
+                    Search products
+                    <input
+                      value={catalogSearch}
+                      onChange={(event) => setCatalogSearch(event.target.value)}
+                      placeholder="Name, barcode, SKU, category, HSN"
+                    />
+                  </label>
+                  <label>
+                    Stock
+                    <select value={catalogStockFilter} onChange={(event) => setCatalogStockFilter(event.target.value)}>
+                      <option value="all">All stock</option>
+                      <option value="in-stock">In stock</option>
+                      <option value="out-of-stock">Out of stock</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="data-list product-catalog-list">
+                  {catalogProducts.map((product) => (
+                    <article className="data-card product-data-card" key={product.id}>
+                      <ProductImage product={product} />
+                      <div className="product-card-content">
+                        <div className="product-card-title">
+                          <strong>{product.name}</strong>
+                          <b>{money(product.price)}</b>
+                        </div>
+                        <span className="product-card-code">{product.barcode}{product.sku ? ` · ${product.sku}` : ""}</span>
+                        <div className="product-card-meta">
+                          <span>{product.category || "Uncategorised"}</span>
+                          <span>HSN {product.hsnCode || "Not set"}</span>
+                          <span>GST {product.gstRate || 0}%</span>
+                          <span className={Number(product.stock) > 0 ? "stock-ok" : "stock-empty"}>Stock {product.stock}</span>
+                        </div>
+                      </div>
+                      <div className="card-actions product-card-actions">
+                        <button type="button" onClick={() => setProductForm({ ...product, imageData: "", removeImage: false })}>Edit</button>
+                        <button type="button" onClick={() => deleteProduct(product.id)}>Delete</button>
+                      </div>
+                    </article>
+                  ))}
+                  {!catalogProducts.length && (
+                    <div className="empty-state">No products match your search.</div>
+                  )}
+                </div>
+              </section>
+            </section>
+          )}
+
+          {activeView === "customers" && (
+            <ListPanel title="Customers" search={customerSearch} setSearch={setCustomerSearch} placeholder="Search customers">
+              {filteredCustomers.length ? filteredCustomers.map((item) => (
+                <article className="data-card" key={item.key}>
+                  <div>
+                    <strong>{item.name}</strong>
+                    <span>{item.phone || "No phone"} · {item.invoiceCount} bills · {money(item.totalSpent)}</span>
+                  </div>
+                  <span>{item.address}</span>
+                </article>
+              )) : <div className="empty-state">No customers saved yet.</div>}
+            </ListPanel>
+          )}
+
+          {activeView === "history" && (
+            <ListPanel title="Sales history" search={invoiceSearch} setSearch={setInvoiceSearch} placeholder="Search invoices">
+              {filteredInvoices.length ? filteredInvoices.map((invoice) => (
+                <article className="data-card" key={invoice.id}>
+                  <div>
+                    <strong>{invoice.id} · {invoice.customer.name}</strong>
+                    <span>{invoice.invoiceType === "gst" ? "GST" : "Regular"} · {new Date(invoice.date).toLocaleString()} · {invoice.paymentMode} · {money(invoice.totals.total)}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLastReturn(null);
+                      setLastInvoice({
+                        ...invoice,
+                        shop: {
+                          ...invoice.shop,
+                          receiptFooter: state.settings.receiptFooter,
+                        },
+                      });
+                      applyPrintPage(invoice.invoiceType);
+                      window.setTimeout(() => window.print(), 100);
+                    }}
+                  >
+                    Print
+                  </button>
+                </article>
+              )) : <div className="empty-state">No invoices generated yet.</div>}
+            </ListPanel>
+          )}
+
+          {activeView === "returns" && (
+            <section className="returns-layout">
+              <section className="panel return-lookup-panel">
+                <div className="panel-title">
+                  <h2>Find original invoice</h2>
+                </div>
+                <label>
+                  Invoice or customer
+                  <input
+                    value={returnSearch}
+                    onChange={(event) => setReturnSearch(event.target.value)}
+                    placeholder="Invoice number, name, phone"
+                  />
+                </label>
+                <div className="return-invoice-list">
+                  {returnInvoiceMatches.map((invoice) => (
+                    <button
+                      className={selectedReturnInvoiceId === invoice.id ? "return-invoice-result active" : "return-invoice-result"}
+                      key={invoice.id}
+                      type="button"
+                      onClick={() => selectReturnInvoice(invoice)}
+                    >
+                      <strong>{invoice.id}</strong>
+                      <span>{invoice.customer.name} · {new Date(invoice.date).toLocaleDateString("en-IN")}</span>
+                      <b>{money(invoice.totals.total)}</b>
+                    </button>
+                  ))}
+                  {!returnInvoiceMatches.length && <div className="empty-state">No matching invoices.</div>}
+                </div>
+              </section>
+
+              {selectedReturnInvoice ? (
+                <form className="panel return-workbench" onSubmit={submitReturn}>
+                  <div className="panel-title">
+                    <div>
+                      <h2>{selectedReturnInvoice.id}</h2>
+                      <span>{selectedReturnInvoice.customer.name} · {selectedReturnInvoice.customer.phone || "No phone"}</span>
+                    </div>
+                    <div className="segmented-control return-mode-control">
+                      <button className={returnType === "return" ? "active" : ""} type="button" onClick={() => { setReturnType("return"); setReplacementItems([]); }}>
+                        Return
+                      </button>
+                      <button className={returnType === "exchange" ? "active" : ""} type="button" onClick={() => setReturnType("exchange")}>
+                        Exchange
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="return-items-table">
+                    <div className="return-items-head">
+                      <span>Sold item</span>
+                      <span>Purchased</span>
+                      <span>Available</span>
+                      <span>Return qty</span>
+                      <span>Credit</span>
+                    </div>
+                    {selectedReturnInvoice.items.map((item, itemIndex) => {
+                      const available = availableReturnQty(selectedReturnInvoice, itemIndex);
+                      const selectedQty = Number(returnQuantities[itemIndex]) || 0;
+                      const unitCredit = Number(item.qty || 0) > 0
+                        ? invoiceLineValue(selectedReturnInvoice, item) / Number(item.qty)
+                        : 0;
+                      return (
+                        <div className="return-item-row" key={`${item.barcode}-${itemIndex}`}>
+                          <div><strong>{item.name}</strong><small>{item.barcode || "Manual item"}</small></div>
+                          <span>{item.qty}</span>
+                          <span>{available}</span>
+                          <input
+                            aria-label={`Return quantity for ${item.name}`}
+                            disabled={available === 0}
+                            max={available}
+                            min="0"
+                            type="number"
+                            value={selectedQty}
+                            onChange={(event) => updateReturnQuantity(itemIndex, event.target.value)}
+                          />
+                          <strong>{money(unitCredit * selectedQty)}</strong>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {returnType === "exchange" && (
+                    <section className="exchange-section">
+                      <div className="panel-title">
+                        <h2>Replacement products</h2>
+                      </div>
+                      <label>
+                        Search replacement
+                        <input
+                          value={replacementSearch}
+                          onChange={(event) => setReplacementSearch(event.target.value)}
+                          placeholder="Product name, barcode, SKU"
+                        />
+                      </label>
+                      {replacementMatches.length > 0 && (
+                        <div className="replacement-results">
+                          {replacementMatches.map((product) => (
+                            <button type="button" key={product.id} onClick={() => addReplacementProduct(product)}>
+                              <ProductImage product={product} compact />
+                              <span><strong>{product.name}</strong><small>{product.barcode} · Stock {product.stock}</small></span>
+                              <b>{money(product.price)}</b>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div className="replacement-cart">
+                        {replacementItems.map((item, index) => (
+                          <div className="replacement-row" key={item.productId}>
+                            <div><strong>{item.name}</strong><small>{item.barcode}</small></div>
+                            <input
+                              aria-label={`${item.name} exchange quantity`}
+                              min="1"
+                              type="number"
+                              value={item.qty}
+                              onChange={(event) => updateReplacementItem(index, { qty: Number(event.target.value) })}
+                            />
+                            <div className="line-discount-control">
+                              <select
+                                aria-label={`${item.name} exchange discount type`}
+                                value={item.discountMode}
+                                onChange={(event) => updateReplacementItem(index, { discountMode: event.target.value })}
+                              >
+                                <option value="percentage">%</option>
+                                <option value="fixed">₹</option>
+                              </select>
+                              <input
+                                aria-label={`${item.name} exchange discount value`}
+                                min="0"
+                                max={item.discountMode === "percentage" ? "100" : undefined}
+                                type="number"
+                                value={item.discountValue}
+                                onChange={(event) => updateReplacementItem(index, { discountValue: Number(event.target.value) })}
+                              />
+                            </div>
+                            <strong>{money(lineTotal(item))}</strong>
+                            <button className="quiet-danger" type="button" onClick={() => setReplacementItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>x</button>
+                          </div>
+                        ))}
+                        {!replacementItems.length && <div className="empty-state">Search and add replacement products.</div>}
+                      </div>
+                    </section>
+                  )}
+
+                  <div className="return-footer-grid">
+                    <div className="field-grid">
+                      <label>
+                        Reason
+                        <input value={returnReason} onChange={(event) => setReturnReason(event.target.value)} placeholder="Optional reason" />
+                      </label>
+                      <label>
+                        {returnType === "return" ? "Refund method" : "Settlement method"}
+                        <select value={settlementMode} onChange={(event) => setSettlementMode(event.target.value)}>
+                          <option>Cash</option>
+                          <option>UPI</option>
+                          <option>Store credit</option>
+                          <option>Original payment</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div className="return-summary">
+                      <div><span>Return credit</span><strong>{money(returnCredit)}</strong></div>
+                      {returnType === "exchange" && <div><span>Replacement value</span><strong>{money(replacementTotal)}</strong></div>}
+                      <div className="return-settlement">
+                        <span>{replacementTotal - returnCredit > 0 ? "Collect from customer" : "Refund customer"}</span>
+                        <strong>{money(Math.abs(replacementTotal - returnCredit))}</strong>
+                      </div>
+                    </div>
+                  </div>
+                  <button className="primary-button" type="submit">
+                    Complete {returnType}
+                  </button>
+                </form>
+              ) : (
+                <section className="panel return-empty-panel">
+                  <div className="empty-state">Select an original invoice to begin a return or exchange.</div>
+                </section>
+              )}
+
+              <section className="panel return-history-panel">
+                <div className="panel-title">
+                  <h2>Return history</h2>
+                  <span>{(state.returns || []).length} records</span>
+                </div>
+                <div className="data-list">
+                  {(state.returns || []).slice().reverse().map((record) => (
+                    <article className="data-card" key={record.id}>
+                      <div>
+                        <strong>{record.id} · {record.type === "exchange" ? "Exchange" : "Return"}</strong>
+                        <span>{record.invoiceId} · {record.customer.name} · {new Date(record.date).toLocaleString()}</span>
+                      </div>
+                      <b>{record.difference > 0 ? `Collect ${money(record.difference)}` : `Refund ${money(Math.abs(record.difference))}`}</b>
+                      <button type="button" onClick={() => printReturnSlip(record)}>Print slip</button>
+                    </article>
+                  ))}
+                  {!(state.returns || []).length && <div className="empty-state">No returns or exchanges recorded yet.</div>}
+                </div>
+              </section>
+            </section>
+          )}
+
+          {activeView === "settings" && (
+            <section className="settings-stack">
+              <form className="panel" onSubmit={saveSettings}>
+                <div className="panel-title">
+                  <h2>Brand and firm details</h2>
+                  <button className="secondary-button" type="submit">Save settings</button>
+                </div>
+                <h3 className="form-section-title">Brand / store</h3>
+                <div className="field-grid">
+                  {["shopName", "shopPhone", "invoicePrefix"].map((field) => (
+                    <label key={field}>
+                      {field.replace(/([A-Z])/g, " $1")}
+                      <input name={field} defaultValue={state.settings[field]} />
+                    </label>
+                  ))}
+                  <label className="wide-field">
+                    Address
+                    <textarea name="shopAddress" rows="3" defaultValue={state.settings.shopAddress} />
+                  </label>
+                  <label className="wide-field">
+                    Receipt footer
+                    <input name="receiptFooter" defaultValue={state.settings.receiptFooter} />
+                  </label>
+                  <label>
+                    UPI ID
+                    <input name="upiId" defaultValue={state.settings.upiId || "Q925031435@ybl"} />
+                  </label>
+                </div>
+                <h3 className="form-section-title">Registered firm for GST invoices</h3>
+                <div className="field-grid">
+                  <label>
+                    Legal firm name
+                    <input name="firmName" defaultValue={state.settings.firmName || ""} />
+                  </label>
+                  <label>
+                    Firm GSTIN
+                    <input name="firmGstin" defaultValue={state.settings.firmGstin || state.settings.shopGstin || ""} />
+                  </label>
+                  <label>
+                    Firm phone
+                    <input name="firmPhone" defaultValue={state.settings.firmPhone || ""} />
+                  </label>
+                  <label>
+                    State code
+                    <input name="firmStateCode" maxLength="2" defaultValue={state.settings.firmStateCode || ""} />
+                  </label>
+                  <label className="wide-field">
+                    Registered address
+                    <textarea name="firmAddress" rows="3" defaultValue={state.settings.firmAddress || ""} />
+                  </label>
+                </div>
+              </form>
+              <section className="panel">
+                <div className="panel-title">
+                  <h2>Data tools</h2>
+                </div>
+                <div className="tool-row">
+                  <a className="secondary-link" href="/api/backup">Export backup</a>
+                  <button className="quiet-danger" type="button" onClick={clearRecords}>Clear customers and invoices</button>
+                </div>
+              </section>
+            </section>
+          )}
+        </section>
+      </main>
+
+      {manualItemOpen && (
+        <div className="camera-backdrop" role="presentation">
+          <form className="manual-item-dialog" onSubmit={addManualItem} role="dialog" aria-modal="true" aria-labelledby="manual-item-title">
+            <div className="camera-dialog-head">
+              <div>
+                <p>Billing</p>
+                <h2 id="manual-item-title">Add manual item</h2>
+              </div>
+              <button className="quiet-button" type="button" onClick={() => setManualItemOpen(false)}>
+                Cancel
+              </button>
+            </div>
+            <div className="field-grid">
+              <label className="wide-field">
+                Item name
+                <input value={manualItem.name} onChange={(event) => setManualItem({ ...manualItem, name: event.target.value })} autoFocus required />
+              </label>
+              <label>
+                Quantity
+                <input min="1" type="number" value={manualItem.qty} onChange={(event) => setManualItem({ ...manualItem, qty: event.target.value })} />
+              </label>
+              <label>
+                Unit price
+                <input min="0" step="0.01" type="number" value={manualItem.price} onChange={(event) => setManualItem({ ...manualItem, price: event.target.value })} required />
+              </label>
+              <label>
+                Discount type
+                <select value={manualItem.discountMode} onChange={(event) => setManualItem({ ...manualItem, discountMode: event.target.value })}>
+                  <option value="percentage">Percentage</option>
+                  <option value="fixed">Fixed amount</option>
+                </select>
+              </label>
+              <label>
+                {manualItem.discountMode === "percentage" ? "Discount %" : "Discount amount"}
+                <input
+                  min="0"
+                  max={manualItem.discountMode === "percentage" ? "100" : undefined}
+                  step="0.01"
+                  type="number"
+                  value={manualItem.discountValue}
+                  onChange={(event) => setManualItem({ ...manualItem, discountValue: event.target.value })}
+                />
+              </label>
+              <label>
+                Barcode
+                <input value={manualItem.barcode} onChange={(event) => setManualItem({ ...manualItem, barcode: event.target.value })} />
+              </label>
+              <label>
+                Category
+                <input value={manualItem.category} onChange={(event) => setManualItem({ ...manualItem, category: event.target.value })} />
+              </label>
+              <label>
+                HSN code
+                <input value={manualItem.hsnCode} onChange={(event) => setManualItem({ ...manualItem, hsnCode: event.target.value })} />
+              </label>
+              <label>
+                GST rate %
+                <input min="0" step="0.01" type="number" value={manualItem.gstRate} onChange={(event) => setManualItem({ ...manualItem, gstRate: event.target.value })} />
+              </label>
+              <label className="checkbox-row wide-field">
+                <input
+                  type="checkbox"
+                  checked={manualItem.saveToCatalog}
+                  onChange={(event) => setManualItem({ ...manualItem, saveToCatalog: event.target.checked })}
+                />
+                <span>Save this item to the product catalog</span>
+              </label>
+              {manualItem.saveToCatalog && (
+                <label>
+                  Available stock
+                  <input min="0" type="number" value={manualItem.stock} onChange={(event) => setManualItem({ ...manualItem, stock: event.target.value })} />
+                </label>
+              )}
+            </div>
+            <div className="manual-item-actions">
+              <button className="quiet-button" type="button" onClick={() => setManualItemOpen(false)}>Cancel</button>
+              <button className="primary-button" type="submit">
+                {manualItem.saveToCatalog ? "Save product and add" : "Add to bill"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {cameraOpen && (
+        <div className="camera-backdrop" role="presentation">
+          <section className="camera-dialog" role="dialog" aria-modal="true" aria-labelledby="camera-title">
+            <div className="camera-dialog-head">
+              <div>
+                <p>Product image</p>
+                <h2 id="camera-title">Take photo</h2>
+              </div>
+              <button className="quiet-button" type="button" onClick={() => setCameraOpen(false)}>
+                Cancel
+              </button>
+            </div>
+            <div className="camera-viewport">
+              <video ref={cameraVideoRef} muted playsInline />
+              {!cameraReady && <span>Starting camera...</span>}
+            </div>
+            <button className="primary-button camera-capture-button" type="button" disabled={!cameraReady} onClick={captureProductImage}>
+              Capture photo
+            </button>
+          </section>
+        </div>
+      )}
+
+      <PrintOutput invoice={lastInvoice} returnRecord={lastReturn} />
+    </>
+  );
+}
+
+function Totals({ totals, invoiceType, gstType }) {
+  return (
+    <div className="totals-list">
+      <div><span>Subtotal</span><strong>{money(totals.gross)}</strong></div>
+      <div>
+        <span>Item discounts</span>
+        <strong>{money(totals.itemDiscount)}</strong>
+      </div>
+      <div>
+        <span>Additional bill discount{totals.discountMode === "percentage" ? ` (${totals.discountValue}%)` : ""}</span>
+        <strong>{money(totals.billDiscount)}</strong>
+      </div>
+      {invoiceType === "gst" && (
+        <>
+          <div><span>Taxable value</span><strong>{money(totals.taxable)}</strong></div>
+          {gstType === "intrastate" ? (
+            <>
+              <div><span>CGST</span><strong>{money(totals.tax / 2)}</strong></div>
+              <div><span>SGST</span><strong>{money(totals.tax / 2)}</strong></div>
+            </>
+          ) : (
+            <div><span>IGST</span><strong>{money(totals.tax)}</strong></div>
+          )}
+        </>
+      )}
+      <div className="grand-total"><span>Total</span><strong>{money(totals.total)}</strong></div>
+      <div><span>Balance</span><strong>{money(totals.balance)}</strong></div>
+    </div>
+  );
+}
+
+function ProductImage({ product, compact = false }) {
+  return (
+    <span className={`product-thumb${compact ? " compact" : ""}`} aria-hidden="true">
+      {product.imageUrl ? <img src={product.imageUrl} alt="" loading="lazy" /> : <span>{product.name?.charAt(0)?.toUpperCase() || "A"}</span>}
+    </span>
+  );
+}
+
+function ReceiptBarcode({ value }) {
+  const barcodeSvgRef = useRef(null);
+
+  useEffect(() => {
+    if (!barcodeSvgRef.current || !value) return;
+    try {
+      JsBarcode(barcodeSvgRef.current, String(value), {
+        format: "CODE128",
+        width: 1.1,
+        height: 24,
+        displayValue: true,
+        fontSize: 8,
+        textMargin: 2,
+        margin: 0,
+        background: "#ffffff",
+        lineColor: "#000000",
+      });
+    } catch {
+      barcodeSvgRef.current.replaceChildren();
+    }
+  }, [value]);
+
+  return <svg className="receipt-barcode" ref={barcodeSvgRef} aria-label={`Barcode ${value}`} />;
+}
+
+function UpiPaymentQr({ invoice }) {
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const upiId = invoice.shop.upiId || "Q925031435@ybl";
+  const amount = Number(invoice.totals.total || 0).toFixed(2);
+
+  useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams({
+      pa: upiId,
+      pn: invoice.shop.shopName || "Alter",
+      am: amount,
+      cu: "INR",
+      tn: `Invoice ${invoice.id}`,
+    });
+    QRCode.toDataURL(`upi://pay?${params.toString()}`, {
+      errorCorrectionLevel: "M",
+      margin: 1,
+      width: 240,
+      color: { dark: "#000000", light: "#ffffff" },
+    }).then((dataUrl) => {
+      if (!cancelled) setQrDataUrl(dataUrl);
+    }).catch(() => {
+      if (!cancelled) setQrDataUrl("");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [amount, invoice.id, invoice.shop.shopName, upiId]);
+
+  return (
+    <div className="upi-payment">
+      <strong>Scan to pay {receiptMoney(invoice.totals.total)}</strong>
+      {qrDataUrl && <img src={qrDataUrl} alt={`UPI QR for ${receiptMoney(invoice.totals.total)}`} />}
+      <span>{upiId}</span>
+    </div>
+  );
+}
+
+function ListPanel({ title, search, setSearch, placeholder, children }) {
+  return (
+    <section className="panel">
+      <div className="panel-title">
+        <h2>{title}</h2>
+        <input className="search-input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={placeholder} />
+      </div>
+      <div className="data-list">{children}</div>
+    </section>
+  );
+}
+
+function PrintOutput({ invoice, returnRecord }) {
+  if (returnRecord) return <ReturnSlip record={returnRecord} />;
+  if (!invoice) return <section className="print-output" aria-hidden="true" />;
+  if (invoice.invoiceType === "gst") return <GstInvoice invoice={invoice} />;
+  return <Receipt invoice={invoice} />;
+}
+
+function ReturnSlip({ record }) {
+  const shop = record.shop || {};
+  const isExchange = record.type === "exchange";
+  const difference = Number(record.difference || 0);
+
+  return (
+    <section className="print-output thermal-print" aria-hidden="true">
+      <div className="receipt return-slip">
+        <img className="receipt-logo" src="/alter-logo-cropped.png" alt="Alter" />
+        <h1>{shop.shopName || "Alter"}</h1>
+        {shop.shopAddress && <p>{shop.shopAddress}</p>}
+        {shop.shopPhone && <p>Phone: {shop.shopPhone}</p>}
+        <div className="receipt-rule" />
+        <h2 className="return-slip-title">{isExchange ? "EXCHANGE SLIP" : "RETURN SLIP"}</h2>
+        <div className="receipt-line"><span>Return ID</span><strong>{record.id}</strong></div>
+        <div className="receipt-line"><span>Original bill</span><strong>{record.invoiceId}</strong></div>
+        <div className="receipt-line"><span>Date</span><strong>{new Date(record.date).toLocaleString()}</strong></div>
+        <div className="receipt-line"><span>Customer</span><strong>{record.customer?.name || "Walk-in customer"}</strong></div>
+        <div className="receipt-invoice-barcode">
+          <ReceiptBarcode value={record.id} />
+        </div>
+        <div className="receipt-rule" />
+        <strong>Returned items</strong>
+        <table className="return-slip-table">
+          <thead>
+            <tr><th>Item</th><th>Qty</th><th>Credit</th></tr>
+          </thead>
+          <tbody>
+            {record.items.map((item, index) => (
+              <tr key={`${item.itemIndex}-${index}`}>
+                <td>{item.name}</td>
+                <td>{item.qty}</td>
+                <td>{formattedAmount(item.credit)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {isExchange && (
+          <>
+            <div className="receipt-rule" />
+            <strong>Replacement items</strong>
+            <table className="return-slip-table">
+              <thead>
+                <tr><th>Item</th><th>Qty</th><th>Amount</th></tr>
+              </thead>
+              <tbody>
+                {record.replacements.map((item, index) => (
+                  <tr key={`${item.productId}-${index}`}>
+                    <td>{item.name}</td>
+                    <td>{item.qty}</td>
+                    <td>{formattedAmount(item.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+        <div className="receipt-rule" />
+        <div className="receipt-line"><span>Return credit</span><strong>{receiptMoney(record.creditTotal)}</strong></div>
+        {isExchange && <div className="receipt-line"><span>Replacement value</span><strong>{receiptMoney(record.replacementTotal)}</strong></div>}
+        <div className="receipt-total">
+          <span>{difference > 0 ? "Amount collected" : "Refund"}</span>
+          <strong>{receiptMoney(Math.abs(difference))}</strong>
+        </div>
+        <div className="receipt-line"><span>Settlement</span><strong>{record.settlementMode}</strong></div>
+        {record.reason && <p className="return-slip-reason"><strong>Reason:</strong> {record.reason}</p>}
+        <p className="receipt-footer">{shop.receiptFooter}</p>
+        <div className="receipt-end-line" aria-hidden="true" />
+      </div>
+    </section>
+  );
+}
+
+function Receipt({ invoice }) {
+  return (
+    <section className="print-output thermal-print" aria-hidden="true">
+      <div className="receipt">
+        <img className="receipt-logo" src="/alter-logo-cropped.png" alt="Alter" />
+        <h1>{invoice.shop.shopName}</h1>
+        {invoice.shop.shopAddress && <p>{invoice.shop.shopAddress}</p>}
+        {invoice.shop.shopPhone && <p>Phone: {invoice.shop.shopPhone}</p>}
+        <div className="receipt-rule" />
+        <div className="receipt-line"><span>Bill</span><strong>{invoice.id}</strong></div>
+        <div className="receipt-line"><span>Date</span><strong>{new Date(invoice.date).toLocaleString()}</strong></div>
+        <div className="receipt-invoice-barcode">
+          <ReceiptBarcode value={invoice.id} />
+        </div>
+        <div className="receipt-line"><span>Customer</span><strong>{invoice.customer.name}</strong></div>
+        {invoice.customer.phone && <div className="receipt-line"><span>Phone</span><strong>{invoice.customer.phone}</strong></div>}
+        <div className="receipt-rule" />
+        <table className="receipt-items-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>MRP</th>
+              <th>Disc.</th>
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {invoice.items.map((item, index) => (
+              <tr key={`${item.barcode}-${index}`}>
+                <td>{item.name} x {item.qty}</td>
+                <td>{formattedAmount(item.price)}</td>
+                <td>{formattedAmount(lineDiscount(item))}</td>
+                <td>{formattedAmount(lineTotal(item))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="receipt-rule" />
+        <div className="receipt-line"><span>Subtotal</span><strong>{receiptMoney(invoice.totals.gross)}</strong></div>
+        <div className="receipt-line"><span>Discount</span><strong>{receiptMoney(invoice.totals.discount)}</strong></div>
+        <div className="receipt-line"><span>Tax</span><strong>{receiptMoney(invoice.totals.tax)}</strong></div>
+        <div className="receipt-total"><span>Total</span><strong>{receiptMoney(invoice.totals.total)}</strong></div>
+        <p className="receipt-footer">{invoice.shop.receiptFooter}</p>
+        <UpiPaymentQr invoice={invoice} />
+        <div className="receipt-end-line" aria-hidden="true" />
+      </div>
+    </section>
+  );
+}
+
+function GstInvoice({ invoice }) {
+  const isInterstate = invoice.gstType === "interstate";
+  const firmName = invoice.shop.firmName || invoice.shop.shopName;
+  const firmAddress = invoice.shop.firmAddress || invoice.shop.shopAddress;
+  const firmPhone = invoice.shop.firmPhone || invoice.shop.shopPhone;
+  const firmGstin = invoice.shop.firmGstin || invoice.shop.shopGstin;
+
+  const hsnSummary = Object.values(
+    invoice.items.reduce((summary, item) => {
+      const key = `${item.hsnCode || "NA"}-${item.gstRate || 0}`;
+      if (!summary[key]) {
+        summary[key] = { hsnCode: item.hsnCode || "NA", gstRate: Number(item.gstRate || 0), taxable: 0, tax: 0 };
+      }
+      summary[key].taxable += Number(item.taxable || 0);
+      summary[key].tax += Number(item.gstAmount || 0);
+      return summary;
+    }, {})
+  );
+
+  return (
+    <section className="print-output gst-print" aria-hidden="true">
+      <article className="gst-invoice">
+        <header className="gst-header">
+          <img src="/alter-logo-cropped.png" alt="Alter" />
+          <div>
+            <h1>{firmName}</h1>
+            <p>{firmAddress}</p>
+            <p>{firmPhone && `Phone: ${firmPhone}`}</p>
+            <p><strong>GSTIN: {firmGstin || "Not configured"}</strong></p>
+          </div>
+          <div className="gst-title">
+            <strong>TAX INVOICE</strong>
+            <span>Original for recipient</span>
+          </div>
+        </header>
+
+        <section className="gst-meta-grid">
+          <div>
+            <h2>Bill to</h2>
+            <strong>{invoice.customer.name}</strong>
+            <p>{invoice.customer.address || "Address not provided"}</p>
+            <p>{invoice.customer.phone && `Phone: ${invoice.customer.phone}`}</p>
+            <p>GSTIN: {invoice.customer.gstin || "Unregistered"}</p>
+            <p>State code: {invoice.customer.stateCode || "-"}</p>
+          </div>
+          <div>
+            <p><span>Invoice No.</span><strong>{invoice.id}</strong></p>
+            <p><span>Invoice Date</span><strong>{new Date(invoice.date).toLocaleDateString("en-IN")}</strong></p>
+            <p><span>Supply type</span><strong>{isInterstate ? "Interstate" : "Intrastate"}</strong></p>
+            <p><span>Place of supply</span><strong>State {invoice.customer.stateCode || invoice.shop.firmStateCode || "-"}</strong></p>
+            <p><span>Payment</span><strong>{invoice.paymentMode}</strong></p>
+          </div>
+        </section>
+
+        <table className="gst-items-table">
+          <thead>
+            <tr>
+              <th>No.</th>
+              <th>Description</th>
+              <th>HSN</th>
+              <th>Qty</th>
+              <th>Rate</th>
+              <th>Discount</th>
+              <th>Taxable</th>
+              <th>GST %</th>
+              {!isInterstate && <th>CGST</th>}
+              {!isInterstate && <th>SGST</th>}
+              {isInterstate && <th>IGST</th>}
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {invoice.items.map((item, index) => (
+              <tr key={`${item.barcode}-${index}`}>
+                <td>{index + 1}</td>
+                <td>{item.name}</td>
+                <td>{item.hsnCode || "-"}</td>
+                <td>{item.qty}</td>
+                <td>{money(item.price)}</td>
+                <td>{money(item.discount)}</td>
+                <td>{money(item.taxable)}</td>
+                <td>{item.gstRate || 0}%</td>
+                {!isInterstate && <td>{money(Number(item.gstAmount || 0) / 2)}</td>}
+                {!isInterstate && <td>{money(Number(item.gstAmount || 0) / 2)}</td>}
+                {isInterstate && <td>{money(item.gstAmount)}</td>}
+                <td>{money(Number(item.taxable || 0) + Number(item.gstAmount || 0))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <section className="gst-bottom-grid">
+          <div>
+            <h2>HSN summary</h2>
+            <table className="hsn-table">
+              <thead>
+                <tr>
+                  <th>HSN</th>
+                  <th>Taxable</th>
+                  <th>Rate</th>
+                  <th>Tax</th>
+                </tr>
+              </thead>
+              <tbody>
+                {hsnSummary.map((row) => (
+                  <tr key={`${row.hsnCode}-${row.gstRate}`}>
+                    <td>{row.hsnCode}</td>
+                    <td>{money(row.taxable)}</td>
+                    <td>{row.gstRate}%</td>
+                    <td>{money(row.tax)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="gst-totals">
+            <p><span>Gross value</span><strong>{money(invoice.totals.gross)}</strong></p>
+            <p><span>Discount</span><strong>{money(invoice.totals.discount)}</strong></p>
+            <p><span>Taxable value</span><strong>{money(invoice.totals.taxable)}</strong></p>
+            {!isInterstate && <p><span>CGST</span><strong>{money(invoice.totals.tax / 2)}</strong></p>}
+            {!isInterstate && <p><span>SGST</span><strong>{money(invoice.totals.tax / 2)}</strong></p>}
+            {isInterstate && <p><span>IGST</span><strong>{money(invoice.totals.tax)}</strong></p>}
+            <p className="gst-grand-total"><span>Invoice total</span><strong>{money(invoice.totals.total)}</strong></p>
+          </div>
+        </section>
+
+        <footer className="gst-footer">
+          <div>
+            <strong>Declaration</strong>
+            <p>We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.</p>
+          </div>
+          <div>
+            <strong>For {firmName}</strong>
+            <span>Authorised signatory</span>
+          </div>
+        </footer>
+      </article>
+    </section>
+  );
+}
+
+createRoot(document.getElementById("root")).render(<App />);

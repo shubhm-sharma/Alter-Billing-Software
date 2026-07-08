@@ -1,0 +1,602 @@
+{
+  "settings": {
+    "shopName": "Alter Store",
+    "shopPhone": "7618185918",
+    "shopAddress": "Kalindi Road, Baghpat Road, Meerut",
+    "shopGstin": "",
+    "firmName": "Prisha Enterprises",
+    "firmPhone": "7618185918",
+    "firmAddress": "812, E-66, Chitrakoot Enclave, Rishi Nagar, Baghpat Road, Meerut",
+    "firmGstin": "09GFSPK8100N1ZP",
+    "firmStateCode": "09",
+    "upiId": "Q925031435@ybl",
+    "invoicePrefix": "ALT",
+    "receiptFooter": "Thank you for shopping with us. Now, shop online at www.shopalter.in"
+  },
+  "products": [
+    {
+      "id": "prd-mr7lo9rs-i6r84",
+      "name": "pearl handbag",
+      "barcode": "511742957",
+      "sku": "",
+      "category": "Handbag",
+      "hsnCode": "4202",
+      "gstRate": 18,
+      "price": 799,
+      "stock": 3,
+      "imageUrl": "/product-images/prd-mr7lo9rs-i6r84-1783329183313.jpg"
+    },
+    {
+      "id": "prd-mr7ozkq5-daco5",
+      "name": "Krazykat Sling sm",
+      "barcode": "22367281",
+      "sku": "",
+      "category": "Sling Bag",
+      "hsnCode": "420266437",
+      "gstRate": 18,
+      "price": 599,
+      "stock": 5,
+      "imageUrl": "/product-images/prd-mr7ozkq5-daco5-1783329197911.jpg"
+    },
+    {
+      "id": "prd-mr8zrxm2-5dssu",
+      "name": "Bear Handbag",
+      "barcode": "38315906",
+      "sku": "",
+      "category": "Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 3180,
+      "stock": 0,
+      "imageUrl": "/product-images/prd-mr8zrxm2-5dssu-1783328552426.jpg"
+    },
+    {
+      "id": "prd-mr907d2p-7ivao",
+      "name": "Handbag",
+      "barcode": "5117652406",
+      "sku": "",
+      "category": "Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 699,
+      "stock": 0,
+      "imageUrl": "/product-images/prd-mr907d2p-7ivao-1783329287706.jpg"
+    },
+    {
+      "id": "prd-mr909wdt-dvkqj",
+      "name": "Handbag",
+      "barcode": "511763905",
+      "sku": "",
+      "category": "Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 999,
+      "stock": 3,
+      "imageUrl": "/product-images/prd-mr909wdt-dvkqj-1783329390642.jpg"
+    },
+    {
+      "id": "prd-mr90hu1l-tkzj8",
+      "name": "Handbag",
+      "barcode": "5117634605",
+      "sku": "",
+      "category": "Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 1399,
+      "stock": 0,
+      "imageUrl": "/product-images/prd-mr90hu1l-tkzj8-1783329760857.jpg"
+    },
+    {
+      "id": "prd-mr90svx9-3afju",
+      "name": "KK Moon handbag",
+      "barcode": "651002256",
+      "sku": "",
+      "category": "handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 1299,
+      "stock": 2,
+      "imageUrl": "/product-images/prd-mr90svx9-3afju-1783330289959.jpg"
+    },
+    {
+      "id": "prd-mr919mvb-p55rt",
+      "name": "Finura Handbag",
+      "barcode": "65103403",
+      "sku": "",
+      "category": "Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 1299,
+      "stock": 0,
+      "imageUrl": "/product-images/prd-mr919mvb-p55rt-1783331057928.jpg"
+    },
+    {
+      "id": "prd-mr91f7zx-xaxyu",
+      "name": "Clutch and Sling Combo",
+      "barcode": "65104405",
+      "sku": "",
+      "category": "Sling bag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 1299,
+      "stock": 2,
+      "imageUrl": "/product-images/prd-mr91f7zx-xaxyu-1783331318589.jpg"
+    },
+    {
+      "id": "prd-mr91koq5-sfjrv",
+      "name": "Handbag",
+      "barcode": "511882956",
+      "sku": "",
+      "category": "Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 799,
+      "stock": 0,
+      "imageUrl": "/product-images/prd-mr91koq5-sfjrv-1783331573550.jpg"
+    },
+    {
+      "id": "prd-mr91qnn2-suhtk",
+      "name": "Sling bag",
+      "barcode": "5117662957",
+      "sku": "",
+      "category": "Sling bag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 799,
+      "stock": 3,
+      "imageUrl": "/product-images/prd-mr91qnn2-suhtk-1783331852078.jpg"
+    },
+    {
+      "id": "prd-mr91tkfc-kjay6",
+      "name": "Sling bag",
+      "barcode": "65106205",
+      "sku": "",
+      "category": "Sling bag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 1399,
+      "stock": 1,
+      "imageUrl": "/product-images/prd-mr91tkfc-kjay6-1783331987880.jpg"
+    },
+    {
+      "id": "prd-mr91wgzf-xz3j6",
+      "name": "Potli Bag",
+      "barcode": "51103705",
+      "sku": "",
+      "category": "Indian",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 999,
+      "stock": 4,
+      "imageUrl": "/product-images/prd-mr91wgzf-xz3j6-1783332123388.jpg"
+    },
+    {
+      "id": "prd-mr91yr8h-wady7",
+      "name": "Sling bag",
+      "barcode": "51102950",
+      "sku": "",
+      "category": "indian",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 799,
+      "stock": 4,
+      "imageUrl": "/product-images/prd-mr91yr8h-wady7-1783332247075.jpg"
+    },
+    {
+      "id": "prd-mr923d7x-p60fv",
+      "name": "Basket Handbag",
+      "barcode": "2516675901",
+      "sku": "",
+      "category": "Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 1499,
+      "stock": 2,
+      "imageUrl": "/product-images/prd-mr923d7x-p60fv-1783332445102.jpg"
+    },
+    {
+      "id": "prd-mr926m6a-7eo4h",
+      "name": "Box Handbag",
+      "barcode": "5213748954",
+      "sku": "",
+      "category": "Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 1599,
+      "stock": 1,
+      "imageUrl": "/product-images/prd-mr926m6a-7eo4h-1783332596674.jpg"
+    },
+    {
+      "id": "prd-mr92954r-p2f9x",
+      "name": "Handbag",
+      "barcode": "51106906",
+      "sku": "",
+      "category": "Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 1299,
+      "stock": 1,
+      "imageUrl": "/product-images/prd-mr92954r-p2f9x-1783332714555.jpg"
+    },
+    {
+      "id": "prd-mr929x6u-dp1qv",
+      "name": "Cherry Handbag",
+      "barcode": "51103906",
+      "sku": "",
+      "category": "Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 999,
+      "stock": 0,
+      "imageUrl": "/product-images/prd-mr929x6u-dp1qv-1783332750918.jpg"
+    },
+    {
+      "id": "prd-mr946ip2-tiubz",
+      "name": "Soft Handbag",
+      "barcode": "2516656501",
+      "sku": "",
+      "category": "Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 1799,
+      "stock": 7,
+      "imageUrl": "/product-images/prd-mr946ip2-tiubz-1783335951400.jpg"
+    },
+    {
+      "id": "prd-mr95yni3-rmz8u",
+      "name": "Alter Office Bag",
+      "barcode": "51062504",
+      "sku": "",
+      "category": "Tote bag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 999,
+      "stock": 3,
+      "imageUrl": "/product-images/prd-mr95yni3-rmz8u-1783338943614.jpg"
+    },
+    {
+      "id": "prd-mr98prw4-8pwpy",
+      "name": "B-Handbag",
+      "barcode": "52754605",
+      "sku": "",
+      "category": "Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 1399,
+      "stock": 4,
+      "imageUrl": "/product-images/prd-mr98prw4-8pwpy-1783343568248.jpg"
+    },
+    {
+      "id": "prd-mr98ra4r-1pdi2",
+      "name": "Sling Bagpack",
+      "barcode": "36467903",
+      "sku": "",
+      "category": "",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 2199,
+      "stock": 1,
+      "imageUrl": "/product-images/prd-mr98ra4r-1pdi2-1783343638540.jpg"
+    },
+    {
+      "id": "prd-mr9bbtjw-6x60v",
+      "name": "Thailand Handbag",
+      "barcode": "2516714806",
+      "sku": "",
+      "category": "Lux Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 2960,
+      "stock": 3,
+      "imageUrl": "/product-images/prd-mr9bbtjw-6x60v-1783347978039.jpg"
+    },
+    {
+      "id": "prd-mr9bhp7a-nhb4n",
+      "name": "Mickey Mouse Handbag",
+      "barcode": "36713902",
+      "sku": "",
+      "category": "Lux Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 3180,
+      "stock": 5,
+      "imageUrl": "/product-images/prd-mr9bhp7a-nhb4n-1783348230358.jpg"
+    },
+    {
+      "id": "prd-mr9blpi8-p9xi3",
+      "name": "Eye Theme Bagpack",
+      "barcode": "36519902",
+      "sku": "",
+      "category": "Lux Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 3980,
+      "stock": 1,
+      "imageUrl": "/product-images/prd-mr9blpi8-p9xi3-1783348417377.jpg"
+    },
+    {
+      "id": "prd-mr9bpvru-l1of7",
+      "name": "Charm Handbag",
+      "barcode": "23446903",
+      "sku": "",
+      "category": "Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 1699,
+      "stock": 0,
+      "imageUrl": "/product-images/prd-mr9bpvru-l1of7-1783348612122.jpg"
+    },
+    {
+      "id": "prd-mr9bs1tl-rfcit",
+      "name": "Lux Handbag",
+      "barcode": "36415903",
+      "sku": "",
+      "category": "Lux Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 3180,
+      "stock": 3,
+      "imageUrl": "/product-images/prd-mr9bs1tl-rfcit-1783348713274.jpg"
+    },
+    {
+      "id": "prd-mr9btz08-emp2c",
+      "name": "Crocodile Handbag",
+      "barcode": "5213747803",
+      "sku": "",
+      "category": "Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 1899,
+      "stock": 5,
+      "imageUrl": "/product-images/prd-mr9btz08-emp2c-1783348802937.jpg"
+    },
+    {
+      "id": "prd-mr9bw05m-xrf5h",
+      "name": "BB Tote Bag",
+      "barcode": "720185074",
+      "sku": "",
+      "category": "Tote Bag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 2150,
+      "stock": 8,
+      "imageUrl": "/product-images/prd-mr9bw05m-xrf5h-1783348897739.jpg"
+    },
+    {
+      "id": "prd-mr9by7d9-wop6w",
+      "name": "Handbag",
+      "barcode": "36545902",
+      "sku": "",
+      "category": "Handbag",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 1649,
+      "stock": 1,
+      "imageUrl": "/product-images/prd-mr9by7d9-wop6w-1783349017619.jpg"
+    },
+    {
+      "id": "prd-mr9c0oup-icxqm",
+      "name": "Barbie Sling",
+      "barcode": "101982160",
+      "sku": "",
+      "category": "Kids",
+      "hsnCode": "",
+      "gstRate": 18,
+      "price": 399,
+      "stock": 3,
+      "imageUrl": "/product-images/prd-mr9c0oup-icxqm-1783349116369.jpg"
+    }
+  ],
+  "customers": [
+    {
+      "key": "9837090470",
+      "name": "Akhelesh Kumar Sharma",
+      "phone": "9837090470",
+      "address": "Rishi Nagar, Meerut",
+      "invoiceCount": 1,
+      "totalSpent": 1.25,
+      "lastPurchase": "2026-07-06T13:58:03.685Z"
+    },
+    {
+      "key": "99988",
+      "name": "test",
+      "phone": "99988",
+      "address": "kjsfkfjs",
+      "invoiceCount": 1,
+      "totalSpent": 0,
+      "lastPurchase": "2026-07-06T14:16:20.575Z"
+    }
+  ],
+  "invoices": [
+    {
+      "id": "ALT-00001",
+      "date": "2026-07-06T13:58:03.685Z",
+      "customer": {
+        "name": "Akhelesh Kumar Sharma",
+        "phone": "9837090470",
+        "address": "Rishi Nagar, Meerut",
+        "gstin": "",
+        "stateCode": ""
+      },
+      "items": [
+        {
+          "productId": "prd-mr7ozkq5-daco5",
+          "name": "Krazykat Sling sm",
+          "barcode": "22367281",
+          "hsnCode": "420266437",
+          "gstRate": 18,
+          "qty": 1,
+          "price": 599,
+          "discount": 149.75,
+          "discountMode": "percentage",
+          "discountValue": 25,
+          "taxable": 1.2500000000000115,
+          "gstAmount": 0
+        }
+      ],
+      "totals": {
+        "gross": 599,
+        "itemDiscount": 149.75,
+        "billDiscount": 448,
+        "discount": 597.75,
+        "discountMode": "fixed",
+        "discountValue": 448,
+        "taxable": 1.25,
+        "tax": 0,
+        "total": 1.25,
+        "paid": 0,
+        "balance": 1.25
+      },
+      "invoiceType": "regular",
+      "gstType": "intrastate",
+      "paymentMode": "Cash",
+      "shop": {
+        "shopName": "Alter Store",
+        "shopPhone": "7618185918",
+        "shopAddress": "Kalindi Road, Baghpat Road, Meerut",
+        "shopGstin": "",
+        "firmName": "Prisha Enterprises",
+        "firmPhone": "7618185918",
+        "firmAddress": "812, E-66, Chitrakoot Enclave, Rishi Nagar, Baghpat Road, Meerut",
+        "firmGstin": "09GFSPK8100N1ZP",
+        "firmStateCode": "09",
+        "upiId": "Q925031435@ybl",
+        "invoicePrefix": "ALT",
+        "receiptFooter": "Thank you for shopping with us. Now, shop online at www.shopalter.in"
+      }
+    },
+    {
+      "id": "ALT-00002",
+      "date": "2026-07-06T14:16:20.575Z",
+      "customer": {
+        "name": "test",
+        "phone": "99988",
+        "address": "kjsfkfjs",
+        "gstin": "",
+        "stateCode": ""
+      },
+      "items": [
+        {
+          "productId": "manual-1783347338600",
+          "name": "Jute Bag",
+          "barcode": "",
+          "hsnCode": "",
+          "gstRate": 18,
+          "qty": 1,
+          "price": 200,
+          "discount": 50,
+          "discountMode": "percentage",
+          "discountValue": 25,
+          "taxable": 0,
+          "gstAmount": 0
+        }
+      ],
+      "totals": {
+        "gross": 200,
+        "itemDiscount": 50,
+        "billDiscount": 150,
+        "discount": 200,
+        "discountMode": "fixed",
+        "discountValue": 150,
+        "taxable": 0,
+        "tax": 0,
+        "total": 0,
+        "paid": 0,
+        "balance": 0
+      },
+      "invoiceType": "regular",
+      "gstType": "intrastate",
+      "paymentMode": "Cash",
+      "shop": {
+        "shopName": "Alter Store",
+        "shopPhone": "7618185918",
+        "shopAddress": "Kalindi Road, Baghpat Road, Meerut",
+        "shopGstin": "",
+        "firmName": "Prisha Enterprises",
+        "firmPhone": "7618185918",
+        "firmAddress": "812, E-66, Chitrakoot Enclave, Rishi Nagar, Baghpat Road, Meerut",
+        "firmGstin": "09GFSPK8100N1ZP",
+        "firmStateCode": "09",
+        "upiId": "Q925031435@ybl",
+        "invoicePrefix": "ALT",
+        "receiptFooter": "Thank you for shopping with us. Now, shop online at www.shopalter.in"
+      }
+    }
+  ],
+  "returns": [
+    {
+      "id": "RET-00001",
+      "date": "2026-07-06T14:23:31.821Z",
+      "type": "return",
+      "invoiceId": "ALT-00002",
+      "customer": {
+        "name": "test",
+        "phone": "99988",
+        "address": "kjsfkfjs",
+        "gstin": "",
+        "stateCode": ""
+      },
+      "items": [
+        {
+          "itemIndex": 0,
+          "productId": "manual-1783347338600",
+          "name": "Jute Bag",
+          "barcode": "",
+          "qty": 1,
+          "unitCredit": 150,
+          "credit": 150
+        }
+      ],
+      "replacements": [],
+      "reason": "",
+      "settlementMode": "UPI",
+      "creditTotal": 150,
+      "replacementTotal": 0,
+      "difference": -150
+    },
+    {
+      "id": "RET-00002",
+      "date": "2026-07-06T17:17:14.973Z",
+      "type": "return",
+      "invoiceId": "ALT-00001",
+      "customer": {
+        "name": "Akhelesh Kumar Sharma",
+        "phone": "9837090470",
+        "address": "Rishi Nagar, Meerut",
+        "gstin": "",
+        "stateCode": ""
+      },
+      "shop": {
+        "shopName": "Alter Store",
+        "shopPhone": "7618185918",
+        "shopAddress": "Kalindi Road, Baghpat Road, Meerut",
+        "shopGstin": "",
+        "firmName": "Prisha Enterprises",
+        "firmPhone": "7618185918",
+        "firmAddress": "812, E-66, Chitrakoot Enclave, Rishi Nagar, Baghpat Road, Meerut",
+        "firmGstin": "09GFSPK8100N1ZP",
+        "firmStateCode": "09",
+        "upiId": "Q925031435@ybl",
+        "invoicePrefix": "ALT",
+        "receiptFooter": "Thank you for shopping with us. Now, shop online at www.shopalter.in"
+      },
+      "items": [
+        {
+          "itemIndex": 0,
+          "productId": "prd-mr7ozkq5-daco5",
+          "name": "Krazykat Sling sm",
+          "barcode": "22367281",
+          "qty": 1,
+          "unitCredit": 1.2500000000000115,
+          "credit": 1.2500000000000115
+        }
+      ],
+      "replacements": [],
+      "reason": "",
+      "settlementMode": "Cash",
+      "creditTotal": 1.2500000000000115,
+      "replacementTotal": 0,
+      "difference": -1.2500000000000115
+    }
+  ]
+}
