@@ -1,14 +1,25 @@
 import express from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { loadEnvFile } from "node:process";
 import { fileURLToPath } from "node:url";
+import { MongoClient } from "mongodb";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
+try {
+  loadEnvFile(path.join(rootDir, ".env"));
+} catch (error) {
+  if (error.code !== "ENOENT") throw error;
+}
+
 const dataDir = path.join(rootDir, "data");
 const dbPath = path.join(dataDir, "db.json");
 const productImagesDir = path.join(dataDir, "product-images");
 const port = Number(process.env.PORT || 4173);
+const mongoUri = process.env.MONGODB_URI;
+const mongoDatabaseName = process.env.MONGODB_DB || "alter-billing";
+let mongoClientPromise;
 
 const defaultDb = {
   settings: {
@@ -36,41 +47,135 @@ app.use(express.json({ limit: "8mb" }));
 app.use("/product-images", express.static(productImagesDir));
 
 async function readDb() {
+  if (mongoUri) return readMongoDb();
+  return readJsonDb();
+}
+
+async function writeDb(db) {
+  if (mongoUri) {
+    await writeMongoDb(db);
+    return;
+  }
+  await writeJsonDb(db);
+}
+
+async function readJsonDb() {
   try {
     const raw = await fs.readFile(dbPath, "utf8");
-    const db = JSON.parse(raw);
-    return {
-      ...defaultDb,
-      ...db,
-      settings: { ...defaultDb.settings, ...db.settings },
-      products: Array.isArray(db.products) ? db.products : [],
-      customers: Array.isArray(db.customers) ? db.customers : [],
-      invoices: Array.isArray(db.invoices) ? db.invoices : [],
-      returns: Array.isArray(db.returns) ? db.returns : [],
-    };
+    return normalizeDb(JSON.parse(raw));
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
-    await writeDb(defaultDb);
+    await writeJsonDb(defaultDb);
     return structuredClone(defaultDb);
   }
 }
 
-async function writeDb(db) {
+async function writeJsonDb(db) {
   await fs.mkdir(dataDir, { recursive: true });
   await fs.writeFile(dbPath, `${JSON.stringify(db, null, 2)}\n`);
+}
+
+function normalizeDb(db = {}) {
+  return {
+    ...defaultDb,
+    ...db,
+    settings: { ...defaultDb.settings, ...(db.settings || {}) },
+    products: Array.isArray(db.products) ? db.products : [],
+    customers: Array.isArray(db.customers) ? db.customers : [],
+    invoices: Array.isArray(db.invoices) ? db.invoices : [],
+    returns: Array.isArray(db.returns) ? db.returns : [],
+  };
+}
+
+async function getMongoDb() {
+  if (!mongoClientPromise) {
+    const client = new MongoClient(mongoUri);
+    mongoClientPromise = client.connect().then(() => client);
+  }
+  return (await mongoClientPromise).db(mongoDatabaseName);
+}
+
+async function readMongoDb() {
+  const db = await getMongoDb();
+  const [settings, products, customers, invoices, returns] = await Promise.all([
+    db.collection("settings").findOne({ id: "settings" }, { projection: { _id: 0 } }),
+    db.collection("products").find({}, { projection: { _id: 0 } }).toArray(),
+    db.collection("customers").find({}, { projection: { _id: 0 } }).toArray(),
+    db.collection("invoices").find({}, { projection: { _id: 0 } }).toArray(),
+    db.collection("returns").find({}, { projection: { _id: 0 } }).toArray(),
+  ]);
+
+  return normalizeDb({ settings, products, customers, invoices, returns });
+}
+
+async function writeMongoDb(appDb) {
+  const db = await getMongoDb();
+  const normalized = normalizeDb(appDb);
+  await Promise.all([
+    replaceMongoCollection(db, "products", normalized.products),
+    replaceMongoCollection(db, "customers", normalized.customers),
+    replaceMongoCollection(db, "invoices", normalized.invoices),
+    replaceMongoCollection(db, "returns", normalized.returns),
+    db.collection("settings").replaceOne(
+      { id: "settings" },
+      { id: "settings", ...normalized.settings },
+      { upsert: true }
+    ),
+  ]);
+}
+
+async function replaceMongoCollection(db, collectionName, records) {
+  const collection = db.collection(collectionName);
+  await collection.deleteMany({});
+  if (records.length) await collection.insertMany(records);
 }
 
 function makeId(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function invoiceId(db) {
+async function invoiceId(db) {
   const prefix = db.settings.invoicePrefix || "ALT";
+  if (mongoUri) {
+    const sequence = await nextMongoSequence(`invoice:${prefix}`, "invoices", prefix);
+    return `${prefix}-${String(sequence).padStart(5, "0")}`;
+  }
   return `${prefix}-${String(db.invoices.length + 1).padStart(5, "0")}`;
 }
 
-function returnId(db) {
+async function returnId(db) {
+  if (mongoUri) {
+    const sequence = await nextMongoSequence("return:RET", "returns", "RET");
+    return `RET-${String(sequence).padStart(5, "0")}`;
+  }
   return `RET-${String(db.returns.length + 1).padStart(5, "0")}`;
+}
+
+async function nextMongoSequence(counterId, collectionName, prefix) {
+  const db = await getMongoDb();
+  const counters = db.collection("counters");
+  const existingCounter = await counters.findOne({ _id: counterId });
+  if (!existingCounter) {
+    const seed = await maxExistingSequence(db, collectionName, prefix);
+    await counters.updateOne({ _id: counterId }, { $setOnInsert: { seq: seed } }, { upsert: true });
+  }
+  const updated = await counters.findOneAndUpdate(
+    { _id: counterId },
+    { $inc: { seq: 1 } },
+    { returnDocument: "after", upsert: true }
+  );
+  const counter = updated?.value || updated;
+  return Number(counter?.seq || 1);
+}
+
+async function maxExistingSequence(db, collectionName, prefix) {
+  const prefixText = `${prefix}-`;
+  const records = await db.collection(collectionName).find({}, { projection: { id: 1 } }).toArray();
+  return records.reduce((max, record) => {
+    if (!String(record.id || "").startsWith(prefixText)) return max;
+    const sequence = Number(String(record.id).slice(prefixText.length));
+    return Number.isFinite(sequence) ? Math.max(max, sequence) : max;
+  }, 0);
 }
 
 function invoiceLineCredit(invoice, item) {
@@ -141,6 +246,49 @@ function upsertCustomer(db, invoice) {
     totalSpent: invoice.totals.total,
     lastPurchase: invoice.date,
   });
+}
+
+async function upsertCustomerInMongo(invoice) {
+  const db = await getMongoDb();
+  const phone = invoice.customer.phone.trim();
+  const key = phone || invoice.customer.name.trim().toLowerCase();
+  await db.collection("customers").updateOne(
+    { key },
+    {
+      $set: {
+        name: invoice.customer.name,
+        phone: invoice.customer.phone,
+        address: invoice.customer.address,
+        lastPurchase: invoice.date,
+      },
+      $setOnInsert: { key },
+      $inc: {
+        invoiceCount: 1,
+        totalSpent: Number(invoice.totals.total || 0),
+      },
+    },
+    { upsert: true }
+  );
+}
+
+async function adjustMongoStock(changes) {
+  const updates = changes
+    .filter((change) => change.qty && (change.productId || change.barcode))
+    .map((change) => ({
+      updateOne: {
+        filter: change.productId ? { id: change.productId } : { barcode: change.barcode },
+        update: [
+          {
+            $set: {
+              stock: { $max: [0, { $add: [{ $ifNull: ["$stock", 0] }, change.qty] }] },
+            },
+          },
+        ],
+      },
+    }));
+  if (!updates.length) return;
+  const db = await getMongoDb();
+  await db.collection("products").bulkWrite(updates);
 }
 
 app.get("/api/state", async (req, res, next) => {
@@ -228,7 +376,7 @@ app.post("/api/invoices", async (req, res, next) => {
       return;
     }
     const invoice = {
-      id: invoiceId(db),
+      id: await invoiceId(db),
       date: new Date().toISOString(),
       customer: {
         name: String(req.body.customer.name || "").trim(),
@@ -257,13 +405,24 @@ app.post("/api/invoices", async (req, res, next) => {
       paymentMode: String(req.body.paymentMode || "Cash"),
       shop: { ...db.settings },
     };
-    db.invoices.push(invoice);
-    upsertCustomer(db, invoice);
-    for (const line of invoice.items) {
-      const product = db.products.find((item) => item.id === line.productId || item.barcode === line.barcode);
-      if (product) product.stock = Math.max(0, Number(product.stock || 0) - line.qty);
+    if (mongoUri) {
+      const mongoDb = await getMongoDb();
+      await mongoDb.collection("invoices").insertOne(invoice);
+      await upsertCustomerInMongo(invoice);
+      await adjustMongoStock(invoice.items.map((line) => ({
+        productId: line.productId,
+        barcode: line.barcode,
+        qty: -line.qty,
+      })));
+    } else {
+      db.invoices.push(invoice);
+      upsertCustomer(db, invoice);
+      for (const line of invoice.items) {
+        const product = db.products.find((item) => item.id === line.productId || item.barcode === line.barcode);
+        if (product) product.stock = Math.max(0, Number(product.stock || 0) - line.qty);
+      }
+      await writeDb(db);
     }
-    await writeDb(db);
     res.json(invoice);
   } catch (error) {
     next(error);
@@ -345,7 +504,7 @@ app.post("/api/returns", async (req, res, next) => {
     const creditTotal = returnedItems.reduce((sum, item) => sum + item.credit, 0);
     const replacementTotal = replacements.reduce((sum, item) => sum + item.amount, 0);
     const record = {
-      id: returnId(db),
+      id: await returnId(db),
       date: new Date().toISOString(),
       type,
       invoiceId: invoice.id,
@@ -369,8 +528,25 @@ app.post("/api/returns", async (req, res, next) => {
       if (product) product.stock = Math.max(0, Number(product.stock || 0) - item.qty);
     }
 
-    db.returns.push(record);
-    await writeDb(db);
+    if (mongoUri) {
+      const mongoDb = await getMongoDb();
+      await mongoDb.collection("returns").insertOne(record);
+      await adjustMongoStock([
+        ...returnedItems.map((item) => ({
+          productId: item.productId,
+          barcode: item.barcode,
+          qty: item.qty,
+        })),
+        ...replacements.map((item) => ({
+          productId: item.productId,
+          barcode: item.barcode,
+          qty: -item.qty,
+        })),
+      ]);
+    } else {
+      db.returns.push(record);
+      await writeDb(db);
+    }
     res.json(record);
   } catch (error) {
     next(error);
