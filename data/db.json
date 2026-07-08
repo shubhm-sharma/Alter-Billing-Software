@@ -215,7 +215,7 @@
       "hsnCode": "",
       "gstRate": 18,
       "price": 1299,
-      "stock": 1,
+      "stock": 0,
       "imageUrl": "/product-images/prd-mr92954r-p2f9x-1783332714555.jpg"
     },
     {
@@ -271,7 +271,7 @@
       "name": "Sling Bagpack",
       "barcode": "36467903",
       "sku": "",
-      "category": "",
+      "category": "Sling Bag",
       "hsnCode": "",
       "gstRate": 18,
       "price": 2199,
@@ -405,6 +405,24 @@
       "invoiceCount": 1,
       "totalSpent": 0,
       "lastPurchase": "2026-07-06T14:16:20.575Z"
+    },
+    {
+      "key": "999999",
+      "name": "test",
+      "phone": "999999",
+      "address": "kjsddnksj",
+      "invoiceCount": 1,
+      "totalSpent": 4108.5,
+      "lastPurchase": "2026-07-08T09:16:39.274Z"
+    },
+    {
+      "key": "9999999",
+      "name": "test user",
+      "phone": "9999999",
+      "address": "kwjsdfkjsd",
+      "invoiceCount": 1,
+      "totalSpent": 480,
+      "lastPurchase": "2026-07-08T13:58:40.388Z"
     }
   ],
   "invoices": [
@@ -521,6 +539,148 @@
         "invoicePrefix": "ALT",
         "receiptFooter": "Thank you for shopping with us. Now, shop online at www.shopalter.in"
       }
+    },
+    {
+      "id": "ALT-00003",
+      "date": "2026-07-08T09:16:39.274Z",
+      "customer": {
+        "name": "test",
+        "phone": "999999",
+        "address": "kjsddnksj",
+        "gstin": "",
+        "stateCode": ""
+      },
+      "items": [
+        {
+          "productId": "prd-mr929x6u-dp1qv",
+          "name": "Cherry Handbag",
+          "barcode": "51103906",
+          "hsnCode": "",
+          "gstRate": 18,
+          "qty": 1,
+          "price": 999,
+          "discount": 249.75,
+          "discountMode": "percentage",
+          "discountValue": 25,
+          "taxable": 749.25,
+          "gstAmount": 0
+        },
+        {
+          "productId": "prd-mr92954r-p2f9x",
+          "name": "Handbag",
+          "barcode": "51106906",
+          "hsnCode": "",
+          "gstRate": 18,
+          "qty": 1,
+          "price": 1299,
+          "discount": 324.75,
+          "discountMode": "percentage",
+          "discountValue": 25,
+          "taxable": 974.25,
+          "gstAmount": 0
+        },
+        {
+          "productId": "prd-mr8zrxm2-5dssu",
+          "name": "Bear Handbag",
+          "barcode": "38315906",
+          "hsnCode": "",
+          "gstRate": 18,
+          "qty": 1,
+          "price": 3180,
+          "discount": 795,
+          "discountMode": "percentage",
+          "discountValue": 25,
+          "taxable": 2385,
+          "gstAmount": 0
+        }
+      ],
+      "totals": {
+        "gross": 5478,
+        "itemDiscount": 1369.5,
+        "billDiscount": 0,
+        "discount": 1369.5,
+        "discountMode": "fixed",
+        "discountValue": 0,
+        "taxable": 4108.5,
+        "tax": 0,
+        "total": 4108.5,
+        "paid": 0,
+        "balance": 4108.5
+      },
+      "invoiceType": "regular",
+      "gstType": "intrastate",
+      "paymentMode": "Cash",
+      "shop": {
+        "shopName": "Alter Store",
+        "shopPhone": "7618185918",
+        "shopAddress": "Kalindi Road, Baghpat Road, Meerut",
+        "shopGstin": "",
+        "firmName": "Prisha Enterprises",
+        "firmPhone": "7618185918",
+        "firmAddress": "812, E-66, Chitrakoot Enclave, Rishi Nagar, Baghpat Road, Meerut",
+        "firmGstin": "09GFSPK8100N1ZP",
+        "firmStateCode": "09",
+        "upiId": "Q925031435@ybl",
+        "invoicePrefix": "ALT",
+        "receiptFooter": "Thank you for shopping with us. Now, shop online at www.shopalter.in"
+      }
+    },
+    {
+      "id": "ALT-00004",
+      "date": "2026-07-08T13:58:40.388Z",
+      "customer": {
+        "name": "test user",
+        "phone": "9999999",
+        "address": "kwjsdfkjsd",
+        "gstin": "",
+        "stateCode": ""
+      },
+      "items": [
+        {
+          "productId": "manual-1783519107773",
+          "name": "Wallet",
+          "barcode": "",
+          "hsnCode": "",
+          "gstRate": 18,
+          "qty": 1,
+          "price": 640,
+          "discount": 160,
+          "discountMode": "percentage",
+          "discountValue": 25,
+          "taxable": 480,
+          "gstAmount": 0
+        }
+      ],
+      "totals": {
+        "gross": 640,
+        "itemDiscount": 160,
+        "billDiscount": 0,
+        "discount": 160,
+        "discountMode": "fixed",
+        "discountValue": 0,
+        "taxable": 480,
+        "tax": 0,
+        "total": 480,
+        "paid": 0,
+        "balance": 480
+      },
+      "invoiceType": "regular",
+      "gstType": "intrastate",
+      "paymentMode": "Cash",
+      "shop": {
+        "shopName": "Alter Store",
+        "shopPhone": "7618185918",
+        "shopAddress": "Kalindi Road, Baghpat Road, Meerut",
+        "shopGstin": "",
+        "firmName": "Prisha Enterprises",
+        "firmPhone": "7618185918",
+        "firmAddress": "812, E-66, Chitrakoot Enclave, Rishi Nagar, Baghpat Road, Meerut",
+        "firmGstin": "09GFSPK8100N1ZP",
+        "firmStateCode": "09",
+        "upiId": "Q925031435@ybl",
+        "invoicePrefix": "ALT",
+        "receiptFooter": "Thank you for shopping with us. Now, shop online at www.shopalter.in"
+      }
     }
   ],
   "returns": [
@@ -597,6 +757,50 @@
       "creditTotal": 1.2500000000000115,
       "replacementTotal": 0,
       "difference": -1.2500000000000115
+    },
+    {
+      "id": "RET-00003",
+      "date": "2026-07-08T14:00:30.580Z",
+      "type": "return",
+      "invoiceId": "ALT-00004",
+      "customer": {
+        "name": "test user",
+        "phone": "9999999",
+        "address": "kwjsdfkjsd",
+        "gstin": "",
+        "stateCode": ""
+      },
+      "shop": {
+        "shopName": "Alter Store",
+        "shopPhone": "7618185918",
+        "shopAddress": "Kalindi Road, Baghpat Road, Meerut",
+        "shopGstin": "",
+        "firmName": "Prisha Enterprises",
+        "firmPhone": "7618185918",
+        "firmAddress": "812, E-66, Chitrakoot Enclave, Rishi Nagar, Baghpat Road, Meerut",
+        "firmGstin": "09GFSPK8100N1ZP",
+        "firmStateCode": "09",
+        "upiId": "Q925031435@ybl",
+        "invoicePrefix": "ALT",
+        "receiptFooter": "Thank you for shopping with us. Now, shop online at www.shopalter.in"
+      },
+      "items": [
+        {
+          "itemIndex": 0,
+          "productId": "manual-1783519107773",
+          "name": "Wallet",
+          "barcode": "",
+          "qty": 1,
+          "unitCredit": 480,
+          "credit": 480
+        }
+      ],
+      "replacements": [],
+      "reason": "",
+      "settlementMode": "Store credit",
+      "creditTotal": 480,
+      "replacementTotal": 0,
+      "difference": -480
     }
   ]
 }
