@@ -699,6 +699,35 @@ textarea:focus {
   grid-column: 1 / -1;
 }
 
+.sales-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.sales-day-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: end;
+  justify-content: space-between;
+}
+
+.sales-day-controls label {
+  min-width: 220px;
+}
+
+.sales-day-total {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  color: var(--forest);
+}
+
+.sales-day-total strong {
+  color: var(--ink);
+  font-size: 24px;
+}
+
 .data-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -1344,6 +1373,52 @@ textarea:focus {
   .return-slip-table th:last-child,
   .return-slip-table td:last-child {
     width: 30%;
+    text-align: right;
+  }
+
+  .daily-sales-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    margin-top: 1.5mm;
+    font-size: 8px;
+    line-height: 1.2;
+  }
+
+  .daily-sales-table th,
+  .daily-sales-table td {
+    padding: 1mm 0.4mm;
+    border-bottom: 1px dotted #000000;
+    overflow-wrap: anywhere;
+    vertical-align: top;
+    font-weight: 600;
+  }
+
+  .daily-sales-table th {
+    font-weight: 700;
+  }
+
+  .daily-sales-table th:first-child,
+  .daily-sales-table td:first-child {
+    width: 48%;
+    text-align: left;
+  }
+
+  .daily-sales-table td:first-child span {
+    display: block;
+    font-size: 7px;
+    font-weight: 500;
+  }
+
+  .daily-sales-table th:nth-child(2),
+  .daily-sales-table td:nth-child(2) {
+    width: 20%;
+    text-align: center;
+  }
+
+  .daily-sales-table th:last-child,
+  .daily-sales-table td:last-child {
+    width: 32%;
     text-align: right;
   }
 

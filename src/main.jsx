@@ -48,6 +48,14 @@ function receiptMoney(value) {
   return `₹${formattedAmount(value)}`;
 }
 
+function dateKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function lineGross(item) {
   return Math.max(0, Number(item.qty || 0) * Number(item.price || 0));
 }
@@ -130,6 +138,8 @@ function App() {
   const [lastInvoice, setLastInvoice] = useState(null);
   const [lastReturn, setLastReturn] = useState(null);
   const [editingInvoiceId, setEditingInvoiceId] = useState("");
+  const [salesPrint, setSalesPrint] = useState(null);
+  const [salesPrintDate, setSalesPrintDate] = useState(dateKey());
   const [notice, setNotice] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
@@ -224,8 +234,8 @@ function App() {
 
   const todaySummary = useMemo(() => {
     if (!state) return { count: 0, total: 0 };
-    const today = new Date().toISOString().slice(0, 10);
-    const invoices = state.invoices.filter((invoice) => invoice.date.startsWith(today));
+    const today = dateKey();
+    const invoices = state.invoices.filter((invoice) => dateKey(invoice.date) === today);
     return { count: invoices.length, total: invoices.reduce((sum, invoice) => sum + Number(invoice.totals.total || 0), 0) };
   }, [state]);
 
@@ -272,6 +282,31 @@ function App() {
       .reverse()
       .filter((item) => [item.id, item.customer.name, item.customer.phone].join(" ").toLowerCase().includes(query));
   }, [state, invoiceSearch]);
+
+  const daySalesInvoices = useMemo(() => {
+    if (!state) return [];
+    return state.invoices
+      .filter((invoice) => dateKey(invoice.date) === salesPrintDate)
+      .sort((first, second) => new Date(first.date) - new Date(second.date));
+  }, [state, salesPrintDate]);
+
+  const daySalesSummary = useMemo(() => {
+    return daySalesInvoices.reduce(
+      (summary, invoice) => {
+        summary.count += 1;
+        summary.gross += Number(invoice.totals?.gross || 0);
+        summary.discount += Number(invoice.totals?.discount || 0);
+        summary.tax += Number(invoice.totals?.tax || 0);
+        summary.total += Number(invoice.totals?.total || 0);
+        summary.cash += invoice.paymentMode === "Cash" ? Number(invoice.totals?.total || 0) : 0;
+        summary.upi += invoice.paymentMode === "UPI" ? Number(invoice.totals?.total || 0) : 0;
+        summary.card += invoice.paymentMode === "Card" ? Number(invoice.totals?.total || 0) : 0;
+        summary.mixed += invoice.paymentMode === "Mixed" ? Number(invoice.totals?.total || 0) : 0;
+        return summary;
+      },
+      { count: 0, gross: 0, discount: 0, tax: 0, total: 0, cash: 0, upi: 0, card: 0, mixed: 0 }
+    );
+  }, [daySalesInvoices]);
 
   const returnInvoiceMatches = useMemo(() => {
     if (!state) return [];
@@ -454,6 +489,23 @@ function App() {
     showNotice(`Editing ${invoice.id}`);
   }
 
+  function printDaySales() {
+    if (!daySalesInvoices.length) {
+      showNotice("No sales found for selected date");
+      return;
+    }
+    setLastInvoice(null);
+    setLastReturn(null);
+    setSalesPrint({
+      date: salesPrintDate,
+      invoices: daySalesInvoices,
+      summary: daySalesSummary,
+      shop: state.settings,
+    });
+    applyPrintPage("regular");
+    window.setTimeout(() => window.print(), 100);
+  }
+
   function cancelInvoiceEdit() {
     setEditingInvoiceId("");
     setCustomer(emptyCustomer);
@@ -482,6 +534,7 @@ function App() {
 
   function printReturnSlip(record) {
     setLastInvoice(null);
+    setSalesPrint(null);
     setLastReturn({
       ...record,
       shop: {
@@ -702,6 +755,7 @@ function App() {
       }),
     });
     setLastReturn(null);
+    setSalesPrint(null);
     setLastInvoice(invoice);
     applyPrintPage(invoice.invoiceType);
     setEditingInvoiceId("");
@@ -1135,37 +1189,56 @@ function App() {
           )}
 
           {activeView === "history" && (
-            <ListPanel title="Sales history" search={invoiceSearch} setSearch={setInvoiceSearch} placeholder="Search invoices">
-              {filteredInvoices.length ? filteredInvoices.map((invoice) => (
-                <article className="data-card" key={invoice.id}>
-                  <div>
-                    <strong>{invoice.id} · {invoice.customer.name}</strong>
-                    <span>{invoice.invoiceType === "gst" ? "GST" : "Regular"} · {new Date(invoice.date).toLocaleString()} · {invoice.paymentMode} · {money(invoice.totals.total)}</span>
+            <section className="sales-stack">
+              <section className="panel sales-day-panel">
+                <div className="panel-title">
+                  <h2>Day wise sales print</h2>
+                  <button className="secondary-button" type="button" onClick={printDaySales}>Print day receipt</button>
+                </div>
+                <div className="sales-day-controls">
+                  <label>
+                    Sales date
+                    <input type="date" value={salesPrintDate} onChange={(event) => setSalesPrintDate(event.target.value)} />
+                  </label>
+                  <div className="sales-day-total">
+                    <span>{daySalesSummary.count} bills</span>
+                    <strong>{money(daySalesSummary.total)}</strong>
                   </div>
-                  <div className="card-actions">
-                    <button type="button" onClick={() => startEditInvoice(invoice)}>Edit</button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLastReturn(null);
-                        setLastInvoice({
-                          ...invoice,
-                          shop: {
-                            ...invoice.shop,
-                            receiptFooter: state.settings.receiptFooter,
-                          },
-                        });
-                        applyPrintPage(invoice.invoiceType);
-                        window.setTimeout(() => window.print(), 100);
-                      }}
-                    >
-                      Print
-                    </button>
-                    <button className="quiet-danger" type="button" onClick={() => deleteInvoice(invoice)}>Delete</button>
-                  </div>
-                </article>
-              )) : <div className="empty-state">No invoices generated yet.</div>}
-            </ListPanel>
+                </div>
+              </section>
+              <ListPanel title="Sales history" search={invoiceSearch} setSearch={setInvoiceSearch} placeholder="Search invoices">
+                {filteredInvoices.length ? filteredInvoices.map((invoice) => (
+                  <article className="data-card" key={invoice.id}>
+                    <div>
+                      <strong>{invoice.id} · {invoice.customer.name}</strong>
+                      <span>{invoice.invoiceType === "gst" ? "GST" : "Regular"} · {new Date(invoice.date).toLocaleString()} · {invoice.paymentMode} · {money(invoice.totals.total)}</span>
+                    </div>
+                    <div className="card-actions">
+                      <button type="button" onClick={() => startEditInvoice(invoice)}>Edit</button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLastReturn(null);
+                          setSalesPrint(null);
+                          setLastInvoice({
+                            ...invoice,
+                            shop: {
+                              ...invoice.shop,
+                              receiptFooter: state.settings.receiptFooter,
+                            },
+                          });
+                          applyPrintPage(invoice.invoiceType);
+                          window.setTimeout(() => window.print(), 100);
+                        }}
+                      >
+                        Print
+                      </button>
+                      <button className="quiet-danger" type="button" onClick={() => deleteInvoice(invoice)}>Delete</button>
+                    </div>
+                  </article>
+                )) : <div className="empty-state">No invoices generated yet.</div>}
+              </ListPanel>
+            </section>
           )}
 
           {activeView === "returns" && (
@@ -1542,7 +1615,7 @@ function App() {
         </div>
       )}
 
-      <PrintOutput invoice={lastInvoice} returnRecord={lastReturn} />
+      <PrintOutput invoice={lastInvoice} returnRecord={lastReturn} salesPrint={salesPrint} />
     </>
   );
 }
@@ -1661,11 +1734,69 @@ function ListPanel({ title, search, setSearch, placeholder, children }) {
   );
 }
 
-function PrintOutput({ invoice, returnRecord }) {
+function PrintOutput({ invoice, returnRecord, salesPrint }) {
+  if (salesPrint) return <DaySalesReceipt report={salesPrint} />;
   if (returnRecord) return <ReturnSlip record={returnRecord} />;
   if (!invoice) return <section className="print-output" aria-hidden="true" />;
   if (invoice.invoiceType === "gst") return <GstInvoice invoice={invoice} />;
   return <Receipt invoice={invoice} />;
+}
+
+function DaySalesReceipt({ report }) {
+  const shop = report.shop || {};
+  const printedAt = new Date();
+
+  return (
+    <section className="print-output thermal-print" aria-hidden="true">
+      <div className="receipt day-sales-receipt">
+        <img className="receipt-logo" src="/alter-logo-cropped.png" alt="Alter" />
+        <h1>{shop.shopName || "Alter"}</h1>
+        {shop.shopAddress && <p>{shop.shopAddress}</p>}
+        {shop.shopPhone && <p>Phone: {shop.shopPhone}</p>}
+        <div className="receipt-rule" />
+        <h2 className="return-slip-title">DAILY SALES</h2>
+        <div className="receipt-line"><span>Date</span><strong>{new Date(`${report.date}T00:00:00`).toLocaleDateString()}</strong></div>
+        <div className="receipt-line"><span>Printed</span><strong>{printedAt.toLocaleString()}</strong></div>
+        <div className="receipt-rule" />
+        <div className="receipt-line"><span>Bills</span><strong>{report.summary.count}</strong></div>
+        <div className="receipt-line"><span>Gross</span><strong>{receiptMoney(report.summary.gross)}</strong></div>
+        <div className="receipt-line"><span>Discount</span><strong>{receiptMoney(report.summary.discount)}</strong></div>
+        <div className="receipt-line"><span>Tax</span><strong>{receiptMoney(report.summary.tax)}</strong></div>
+        <div className="receipt-total"><span>Net sales</span><strong>{receiptMoney(report.summary.total)}</strong></div>
+        <div className="receipt-rule" />
+        <strong>Payment summary</strong>
+        <div className="receipt-line"><span>Cash</span><strong>{receiptMoney(report.summary.cash)}</strong></div>
+        <div className="receipt-line"><span>UPI</span><strong>{receiptMoney(report.summary.upi)}</strong></div>
+        <div className="receipt-line"><span>Card</span><strong>{receiptMoney(report.summary.card)}</strong></div>
+        <div className="receipt-line"><span>Mixed</span><strong>{receiptMoney(report.summary.mixed)}</strong></div>
+        <div className="receipt-rule" />
+        <strong>Bill details</strong>
+        <table className="daily-sales-table">
+          <thead>
+            <tr>
+              <th>Bill</th>
+              <th>Mode</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.invoices.map((invoice) => (
+              <tr key={invoice.id}>
+                <td>
+                  <strong>{invoice.id}</strong>
+                  <span>{new Date(invoice.date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                </td>
+                <td>{invoice.paymentMode}</td>
+                <td>{formattedAmount(invoice.totals.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="receipt-footer">{shop.receiptFooter}</p>
+        <div className="receipt-end-line" aria-hidden="true" />
+      </div>
+    </section>
+  );
 }
 
 function ReturnSlip({ record }) {
