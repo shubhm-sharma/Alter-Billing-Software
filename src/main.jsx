@@ -129,6 +129,7 @@ function App() {
   const [replacementItems, setReplacementItems] = useState([]);
   const [lastInvoice, setLastInvoice] = useState(null);
   const [lastReturn, setLastReturn] = useState(null);
+  const [editingInvoiceId, setEditingInvoiceId] = useState("");
   const [notice, setNotice] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
@@ -425,6 +426,60 @@ function App() {
     );
   }
 
+  function startEditInvoice(invoice) {
+    if (state.returns.some((record) => record.invoiceId === invoice.id)) {
+      showNotice("Invoices with returns or exchanges cannot be edited");
+      return;
+    }
+    setEditingInvoiceId(invoice.id);
+    setActiveView("billing");
+    setCustomer({ ...emptyCustomer, ...invoice.customer });
+    setInvoiceType(invoice.invoiceType === "gst" ? "gst" : "regular");
+    setGstType(invoice.gstType === "interstate" ? "interstate" : "intrastate");
+    setPaymentMode(invoice.paymentMode || "Cash");
+    setDiscountMode(invoice.totals?.discountMode === "percentage" ? "percentage" : "fixed");
+    setDiscountValue(Number(invoice.totals?.discountValue || 0));
+    setAmountPaid(Number(invoice.totals?.paid || invoice.totals?.total || 0));
+    setCart(invoice.items.map((item) => {
+      const product = state.products.find((candidate) => candidate.id === item.productId || candidate.barcode === item.barcode);
+      return {
+        ...item,
+        imageUrl: product?.imageUrl || "",
+        discountMode: item.discountMode === "fixed" ? "fixed" : "percentage",
+        discountValue: Number(item.discountValue || 0),
+      };
+    }));
+    setSearch("");
+    setBarcode("");
+    showNotice(`Editing ${invoice.id}`);
+  }
+
+  function cancelInvoiceEdit() {
+    setEditingInvoiceId("");
+    setCustomer(emptyCustomer);
+    setCart([]);
+    setAmountPaid(0);
+    setDiscountMode("fixed");
+    setDiscountValue(0);
+    showNotice("Invoice edit cancelled");
+  }
+
+  async function deleteInvoice(invoice) {
+    if (state.returns.some((record) => record.invoiceId === invoice.id)) {
+      showNotice("Invoices with returns or exchanges cannot be deleted");
+      return;
+    }
+    const confirmed = window.confirm(`Delete invoice ${invoice.id}? Stock and customer totals will be adjusted.`);
+    if (!confirmed) return;
+    try {
+      await api(`/api/invoices/${encodeURIComponent(invoice.id)}`, { method: "DELETE" });
+      await loadState();
+      showNotice(`${invoice.id} deleted`);
+    } catch (error) {
+      showNotice(error.message);
+    }
+  }
+
   function printReturnSlip(record) {
     setLastInvoice(null);
     setLastReturn({
@@ -627,8 +682,8 @@ function App() {
     }
     const cartTaxable = cart.reduce((sum, item) => sum + lineTaxable(item), 0);
     const billDiscountRatio = cartTaxable > 0 ? totals.billDiscount / cartTaxable : 0;
-    const invoice = await api("/api/invoices", {
-      method: "POST",
+    const invoice = await api(editingInvoiceId ? `/api/invoices/${encodeURIComponent(editingInvoiceId)}` : "/api/invoices", {
+      method: editingInvoiceId ? "PUT" : "POST",
       body: JSON.stringify({
         customer,
         items: cart.map((item) => {
@@ -649,6 +704,7 @@ function App() {
     setLastReturn(null);
     setLastInvoice(invoice);
     applyPrintPage(invoice.invoiceType);
+    setEditingInvoiceId("");
     setCustomer(emptyCustomer);
     setCart([]);
     setAmountPaid(0);
@@ -721,8 +777,13 @@ function App() {
             <form className="billing-grid" onSubmit={generateBill}>
               <section className="panel scan-panel">
                 <div className="panel-title">
-                  <h2>Scan or search</h2>
+                  <h2>{editingInvoiceId ? `Edit ${editingInvoiceId}` : "Scan or search"}</h2>
                   <div className="panel-actions">
+                    {editingInvoiceId && (
+                      <button className="quiet-button" type="button" onClick={cancelInvoiceEdit}>
+                        Cancel edit
+                      </button>
+                    )}
                     <button className="secondary-button" type="button" onClick={() => setManualItemOpen(true)}>
                       Manual item
                     </button>
@@ -876,7 +937,7 @@ function App() {
               <section className="panel totals-panel">
                 <div className="panel-title">
                   <h2>Payment</h2>
-                  <span>{state.settings.invoicePrefix}-{String(state.invoices.length + 1).padStart(5, "0")}</span>
+                  <span>{editingInvoiceId || `${state.settings.invoicePrefix}-${String(state.invoices.length + 1).padStart(5, "0")}`}</span>
                 </div>
                 <div className="field-grid compact">
                   <label>
@@ -913,7 +974,7 @@ function App() {
                 </div>
                 <Totals totals={totals} invoiceType={invoiceType} gstType={gstType} />
                 <button className="primary-button" type="submit">
-                  {invoiceType === "gst" ? "Generate A4 GST invoice" : "Generate 2 inch bill"}
+                  {editingInvoiceId ? "Update invoice" : invoiceType === "gst" ? "Generate A4 GST invoice" : "Generate 2 inch bill"}
                 </button>
               </section>
             </form>
@@ -1081,23 +1142,27 @@ function App() {
                     <strong>{invoice.id} · {invoice.customer.name}</strong>
                     <span>{invoice.invoiceType === "gst" ? "GST" : "Regular"} · {new Date(invoice.date).toLocaleString()} · {invoice.paymentMode} · {money(invoice.totals.total)}</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLastReturn(null);
-                      setLastInvoice({
-                        ...invoice,
-                        shop: {
-                          ...invoice.shop,
-                          receiptFooter: state.settings.receiptFooter,
-                        },
-                      });
-                      applyPrintPage(invoice.invoiceType);
-                      window.setTimeout(() => window.print(), 100);
-                    }}
-                  >
-                    Print
-                  </button>
+                  <div className="card-actions">
+                    <button type="button" onClick={() => startEditInvoice(invoice)}>Edit</button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLastReturn(null);
+                        setLastInvoice({
+                          ...invoice,
+                          shop: {
+                            ...invoice.shop,
+                            receiptFooter: state.settings.receiptFooter,
+                          },
+                        });
+                        applyPrintPage(invoice.invoiceType);
+                        window.setTimeout(() => window.print(), 100);
+                      }}
+                    >
+                      Print
+                    </button>
+                    <button className="quiet-danger" type="button" onClick={() => deleteInvoice(invoice)}>Delete</button>
+                  </div>
                 </article>
               )) : <div className="empty-state">No invoices generated yet.</div>}
             </ListPanel>

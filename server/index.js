@@ -186,6 +186,46 @@ function invoiceLineCredit(invoice, item) {
   return Math.max(0, Number(item.qty || 0) * Number(item.price || 0) - Number(item.discount || 0));
 }
 
+function buildInvoice(db, body, { id, date } = {}) {
+  const items = Array.isArray(body.items) ? body.items : [];
+  return {
+    id,
+    date: date || new Date().toISOString(),
+    customer: {
+      name: String(body.customer.name || "").trim(),
+      phone: String(body.customer.phone || "").trim(),
+      address: String(body.customer.address || "").trim(),
+      gstin: String(body.customer.gstin || "").trim(),
+      stateCode: String(body.customer.stateCode || "").trim(),
+    },
+    items: items.map((item) => ({
+      productId: item.productId || "",
+      name: String(item.name || "").trim(),
+      barcode: String(item.barcode || "").trim(),
+      hsnCode: String(item.hsnCode || "").trim(),
+      gstRate: Math.max(0, Number(item.gstRate) || 0),
+      qty: Math.max(1, Number(item.qty) || 1),
+      price: Math.max(0, Number(item.price) || 0),
+      discount: Math.max(0, Number(item.discount) || 0),
+      discountMode: item.discountMode === "percentage" ? "percentage" : "fixed",
+      discountValue: Math.max(0, Number(item.discountValue) || 0),
+      taxable: Math.max(0, Number(item.taxable) || 0),
+      gstAmount: Math.max(0, Number(item.gstAmount) || 0),
+    })),
+    totals: body.totals,
+    invoiceType: body.invoiceType === "gst" ? "gst" : "regular",
+    gstType: body.gstType === "interstate" ? "interstate" : "intrastate",
+    paymentMode: String(body.paymentMode || "Cash"),
+    shop: { ...db.settings },
+  };
+}
+
+function validateInvoiceInput(body) {
+  const items = Array.isArray(body.items) ? body.items : [];
+  if (!body.customer?.name?.trim() || !items.length) return "Customer name and at least one item are required.";
+  return "";
+}
+
 function normalizeProduct(input, existing = {}) {
   return {
     id: input.id || makeId("prd"),
@@ -248,6 +288,39 @@ function upsertCustomer(db, invoice) {
   });
 }
 
+function summarizeCustomers(invoices) {
+  const customers = new Map();
+  for (const invoice of invoices) {
+    const phone = invoice.customer.phone.trim();
+    const key = phone || invoice.customer.name.trim().toLowerCase();
+    if (!key) continue;
+    const existing = customers.get(key);
+    if (existing) {
+      existing.name = invoice.customer.name;
+      existing.phone = invoice.customer.phone;
+      existing.address = invoice.customer.address;
+      existing.invoiceCount += 1;
+      existing.totalSpent += Number(invoice.totals.total || 0);
+      if (invoice.date > existing.lastPurchase) existing.lastPurchase = invoice.date;
+    } else {
+      customers.set(key, {
+        key,
+        name: invoice.customer.name,
+        phone: invoice.customer.phone,
+        address: invoice.customer.address,
+        invoiceCount: 1,
+        totalSpent: Number(invoice.totals.total || 0),
+        lastPurchase: invoice.date,
+      });
+    }
+  }
+  return [...customers.values()];
+}
+
+function rebuildCustomers(db) {
+  db.customers = summarizeCustomers(db.invoices);
+}
+
 async function upsertCustomerInMongo(invoice) {
   const db = await getMongoDb();
   const phone = invoice.customer.phone.trim();
@@ -269,6 +342,29 @@ async function upsertCustomerInMongo(invoice) {
     },
     { upsert: true }
   );
+}
+
+async function replaceMongoCustomers(invoices) {
+  const db = await getMongoDb();
+  await replaceMongoCollection(db, "customers", summarizeCustomers(invoices));
+}
+
+function invoiceStockChanges(invoice, direction) {
+  return invoice.items.map((line) => ({
+    productId: line.productId,
+    barcode: line.barcode,
+    qty: direction * Number(line.qty || 0),
+  }));
+}
+
+function adjustLocalStock(products, changes) {
+  for (const change of changes) {
+    if (!change.qty) continue;
+    const product = products.find((candidate) =>
+      change.productId ? candidate.id === change.productId : candidate.barcode === change.barcode
+    );
+    if (product) product.stock = Math.max(0, Number(product.stock || 0) + change.qty);
+  }
 }
 
 async function adjustMongoStock(changes) {
@@ -370,60 +466,104 @@ app.delete("/api/products/:id", async (req, res, next) => {
 app.post("/api/invoices", async (req, res, next) => {
   try {
     const db = await readDb();
-    const items = Array.isArray(req.body.items) ? req.body.items : [];
-    if (!req.body.customer?.name?.trim() || !items.length) {
-      res.status(400).json({ error: "Customer name and at least one item are required." });
+    const validationError = validateInvoiceInput(req.body);
+    if (validationError) {
+      res.status(400).json({ error: validationError });
       return;
     }
-    const invoice = {
-      id: await invoiceId(db),
-      date: new Date().toISOString(),
-      customer: {
-        name: String(req.body.customer.name || "").trim(),
-        phone: String(req.body.customer.phone || "").trim(),
-        address: String(req.body.customer.address || "").trim(),
-        gstin: String(req.body.customer.gstin || "").trim(),
-        stateCode: String(req.body.customer.stateCode || "").trim(),
-      },
-      items: items.map((item) => ({
-        productId: item.productId || "",
-        name: String(item.name || "").trim(),
-        barcode: String(item.barcode || "").trim(),
-        hsnCode: String(item.hsnCode || "").trim(),
-        gstRate: Math.max(0, Number(item.gstRate) || 0),
-        qty: Math.max(1, Number(item.qty) || 1),
-        price: Math.max(0, Number(item.price) || 0),
-        discount: Math.max(0, Number(item.discount) || 0),
-        discountMode: item.discountMode === "percentage" ? "percentage" : "fixed",
-        discountValue: Math.max(0, Number(item.discountValue) || 0),
-        taxable: Math.max(0, Number(item.taxable) || 0),
-        gstAmount: Math.max(0, Number(item.gstAmount) || 0),
-      })),
-      totals: req.body.totals,
-      invoiceType: req.body.invoiceType === "gst" ? "gst" : "regular",
-      gstType: req.body.gstType === "interstate" ? "interstate" : "intrastate",
-      paymentMode: String(req.body.paymentMode || "Cash"),
-      shop: { ...db.settings },
-    };
+    const invoice = buildInvoice(db, req.body, { id: await invoiceId(db) });
     if (mongoUri) {
       const mongoDb = await getMongoDb();
       await mongoDb.collection("invoices").insertOne(invoice);
       await upsertCustomerInMongo(invoice);
-      await adjustMongoStock(invoice.items.map((line) => ({
-        productId: line.productId,
-        barcode: line.barcode,
-        qty: -line.qty,
-      })));
+      await adjustMongoStock(invoiceStockChanges(invoice, -1));
     } else {
       db.invoices.push(invoice);
       upsertCustomer(db, invoice);
-      for (const line of invoice.items) {
-        const product = db.products.find((item) => item.id === line.productId || item.barcode === line.barcode);
-        if (product) product.stock = Math.max(0, Number(product.stock || 0) - line.qty);
-      }
+      adjustLocalStock(db.products, invoiceStockChanges(invoice, -1));
       await writeDb(db);
     }
     res.json(invoice);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/api/invoices/:id", async (req, res, next) => {
+  try {
+    const db = await readDb();
+    const existing = db.invoices.find((invoice) => invoice.id === req.params.id);
+    if (!existing) {
+      res.status(404).json({ error: "Invoice was not found." });
+      return;
+    }
+    if (db.returns.some((record) => record.invoiceId === existing.id)) {
+      res.status(409).json({ error: "Invoices with returns or exchanges cannot be edited." });
+      return;
+    }
+    const validationError = validateInvoiceInput(req.body);
+    if (validationError) {
+      res.status(400).json({ error: validationError });
+      return;
+    }
+
+    const invoice = {
+      ...buildInvoice(db, req.body, { id: existing.id, date: existing.date }),
+      editedAt: new Date().toISOString(),
+    };
+    const invoiceIndex = db.invoices.findIndex((item) => item.id === existing.id);
+    db.invoices[invoiceIndex] = invoice;
+    rebuildCustomers(db);
+
+    const stockChanges = [
+      ...invoiceStockChanges(existing, 1),
+      ...invoiceStockChanges(invoice, -1),
+    ];
+
+    if (mongoUri) {
+      const mongoDb = await getMongoDb();
+      await mongoDb.collection("invoices").replaceOne({ id: existing.id }, invoice);
+      await replaceMongoCustomers(db.invoices);
+      await adjustMongoStock(stockChanges);
+    } else {
+      adjustLocalStock(db.products, stockChanges);
+      await writeDb(db);
+    }
+
+    res.json(invoice);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/invoices/:id", async (req, res, next) => {
+  try {
+    const db = await readDb();
+    const invoice = db.invoices.find((item) => item.id === req.params.id);
+    if (!invoice) {
+      res.status(404).json({ error: "Invoice was not found." });
+      return;
+    }
+    if (db.returns.some((record) => record.invoiceId === invoice.id)) {
+      res.status(409).json({ error: "Invoices with returns or exchanges cannot be deleted." });
+      return;
+    }
+
+    db.invoices = db.invoices.filter((item) => item.id !== invoice.id);
+    rebuildCustomers(db);
+    const stockChanges = invoiceStockChanges(invoice, 1);
+
+    if (mongoUri) {
+      const mongoDb = await getMongoDb();
+      await mongoDb.collection("invoices").deleteOne({ id: invoice.id });
+      await replaceMongoCustomers(db.invoices);
+      await adjustMongoStock(stockChanges);
+    } else {
+      adjustLocalStock(db.products, stockChanges);
+      await writeDb(db);
+    }
+
+    res.json({ ok: true });
   } catch (error) {
     next(error);
   }
