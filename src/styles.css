@@ -335,6 +335,13 @@ textarea:focus {
   background: var(--accent);
 }
 
+.primary-button:disabled,
+.secondary-button:disabled,
+.quiet-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
 .secondary-button,
 .secondary-link {
   display: inline-grid;
@@ -699,9 +706,85 @@ textarea:focus {
   grid-column: 1 / -1;
 }
 
+.customer-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.customer-lookup {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.customer-match-list {
+  display: grid;
+  gap: 8px;
+  margin: -4px 0 16px;
+}
+
+.customer-match-list button {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid #dfe6ea;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--ink);
+  background: #f9fbfb;
+  text-align: left;
+}
+
+.customer-match-list span {
+  display: grid;
+  gap: 2px;
+}
+
+.customer-match-list small,
+.panel-note {
+  color: var(--muted);
+}
+
 .sales-stack {
   display: grid;
   gap: 18px;
+}
+
+.sales-range-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: end;
+}
+
+.sales-range-controls label {
+  min-width: 180px;
+}
+
+.sales-report-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.sales-report-grid div {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid #edf0f3;
+  border-radius: 8px;
+  background: #fbfcfc;
+}
+
+.sales-report-grid span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.sales-report-grid strong {
+  color: var(--ink);
+  font-size: 18px;
 }
 
 .sales-day-controls {
@@ -1124,6 +1207,10 @@ textarea:focus {
   .return-footer-grid {
     grid-template-columns: 1fr;
   }
+
+  .sales-report-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
@@ -1167,6 +1254,22 @@ textarea:focus {
 
   .return-footer-grid .field-grid {
     grid-template-columns: 1fr;
+  }
+
+  .sales-report-grid,
+  .sales-range-controls,
+  .sales-day-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-report-grid {
+    display: grid;
+  }
+
+  .sales-range-controls label,
+  .sales-day-controls label {
+    min-width: 0;
+    width: 100%;
   }
 
   .product-image-editor {

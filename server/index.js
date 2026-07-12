@@ -226,6 +226,18 @@ function validateInvoiceInput(body) {
   return "";
 }
 
+function csvEscape(value) {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function toCsv(rows, headers) {
+  return [
+    headers.map((header) => csvEscape(header.label)).join(","),
+    ...rows.map((row) => headers.map((header) => csvEscape(header.value(row))).join(",")),
+  ].join("\n");
+}
+
 function normalizeProduct(input, existing = {}) {
   return {
     id: input.id || makeId("prd"),
@@ -390,6 +402,25 @@ async function adjustMongoStock(changes) {
 app.get("/api/state", async (req, res, next) => {
   try {
     res.json(await readDb());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/customers/export.csv", async (req, res, next) => {
+  try {
+    const db = await readDb();
+    const csv = toCsv(db.customers, [
+      { label: "Name", value: (customer) => customer.name },
+      { label: "Phone", value: (customer) => customer.phone },
+      { label: "Address", value: (customer) => customer.address },
+      { label: "Invoice Count", value: (customer) => customer.invoiceCount },
+      { label: "Total Spent", value: (customer) => Number(customer.totalSpent || 0).toFixed(2) },
+      { label: "Last Purchase", value: (customer) => customer.lastPurchase },
+    ]);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="alter-customers-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(csv);
   } catch (error) {
     next(error);
   }

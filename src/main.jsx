@@ -56,6 +56,44 @@ function dateKey(value = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+function monthStartKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  return dateKey(new Date(date.getFullYear(), date.getMonth(), 1));
+}
+
+function monthEndKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  return dateKey(new Date(date.getFullYear(), date.getMonth() + 1, 0));
+}
+
+function quarterStartKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  const quarterStartMonth = Math.floor(date.getMonth() / 3) * 3;
+  return dateKey(new Date(date.getFullYear(), quarterStartMonth, 1));
+}
+
+function quarterEndKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  const quarterStartMonth = Math.floor(date.getMonth() / 3) * 3;
+  return dateKey(new Date(date.getFullYear(), quarterStartMonth + 3, 0));
+}
+
+function downloadCsv(filename, rows) {
+  const csv = rows.map((row) =>
+    row.map((value) => {
+      const text = String(value ?? "");
+      return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+    }).join(",")
+  ).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function lineGross(item) {
   return Math.max(0, Number(item.qty || 0) * Number(item.price || 0));
 }
@@ -113,6 +151,7 @@ function App() {
   const [activeView, setActiveView] = useState("billing");
   const [state, setState] = useState(null);
   const [customer, setCustomer] = useState(emptyCustomer);
+  const [customerLookup, setCustomerLookup] = useState("");
   const [cart, setCart] = useState([]);
   const [barcode, setBarcode] = useState("");
   const [search, setSearch] = useState("");
@@ -140,6 +179,9 @@ function App() {
   const [editingInvoiceId, setEditingInvoiceId] = useState("");
   const [salesPrint, setSalesPrint] = useState(null);
   const [salesPrintDate, setSalesPrintDate] = useState(dateKey());
+  const [salesReportStart, setSalesReportStart] = useState(monthStartKey());
+  const [salesReportEnd, setSalesReportEnd] = useState(dateKey());
+  const [isBilling, setIsBilling] = useState(false);
   const [notice, setNotice] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
@@ -274,6 +316,14 @@ function App() {
     return state.customers.filter((item) => [item.name, item.phone, item.address].join(" ").toLowerCase().includes(query));
   }, [state, customerSearch]);
 
+  const billingCustomerMatches = useMemo(() => {
+    if (!state || !customerLookup.trim()) return [];
+    const query = customerLookup.trim().toLowerCase();
+    return state.customers
+      .filter((item) => [item.name, item.phone, item.address].join(" ").toLowerCase().includes(query))
+      .slice(0, 6);
+  }, [state, customerLookup]);
+
   const filteredInvoices = useMemo(() => {
     if (!state) return [];
     const query = invoiceSearch.trim().toLowerCase();
@@ -307,6 +357,34 @@ function App() {
       { count: 0, gross: 0, discount: 0, tax: 0, total: 0, cash: 0, upi: 0, card: 0, mixed: 0 }
     );
   }, [daySalesInvoices]);
+
+  const rangeSalesInvoices = useMemo(() => {
+    if (!state) return [];
+    return state.invoices
+      .filter((invoice) => {
+        const key = dateKey(invoice.date);
+        return key >= salesReportStart && key <= salesReportEnd;
+      })
+      .sort((first, second) => new Date(first.date) - new Date(second.date));
+  }, [state, salesReportStart, salesReportEnd]);
+
+  const rangeSalesSummary = useMemo(() => {
+    return rangeSalesInvoices.reduce(
+      (summary, invoice) => {
+        summary.count += 1;
+        summary.gross += Number(invoice.totals?.gross || 0);
+        summary.discount += Number(invoice.totals?.discount || 0);
+        summary.tax += Number(invoice.totals?.tax || 0);
+        summary.total += Number(invoice.totals?.total || 0);
+        summary.cash += invoice.paymentMode === "Cash" ? Number(invoice.totals?.total || 0) : 0;
+        summary.upi += invoice.paymentMode === "UPI" ? Number(invoice.totals?.total || 0) : 0;
+        summary.card += invoice.paymentMode === "Card" ? Number(invoice.totals?.total || 0) : 0;
+        summary.mixed += invoice.paymentMode === "Mixed" ? Number(invoice.totals?.total || 0) : 0;
+        return summary;
+      },
+      { count: 0, gross: 0, discount: 0, tax: 0, total: 0, cash: 0, upi: 0, card: 0, mixed: 0 }
+    );
+  }, [rangeSalesInvoices]);
 
   const returnInvoiceMatches = useMemo(() => {
     if (!state) return [];
@@ -382,6 +460,81 @@ function App() {
     setSearch("");
     setBarcode("");
     barcodeRef.current?.focus();
+  }
+
+  function selectBillingCustomer(savedCustomer) {
+    setCustomer({
+      ...emptyCustomer,
+      name: savedCustomer.name || "",
+      phone: savedCustomer.phone || "",
+      address: savedCustomer.address || "",
+    });
+    setCustomerLookup("");
+    showNotice(`${savedCustomer.name} linked`);
+  }
+
+  function exportCustomersCsv() {
+    const rows = [
+      ["Name", "Phone", "Address", "Invoice Count", "Total Spent", "Last Purchase"],
+      ...state.customers.map((item) => [
+        item.name,
+        item.phone,
+        item.address,
+        item.invoiceCount,
+        Number(item.totalSpent || 0).toFixed(2),
+        item.lastPurchase || "",
+      ]),
+    ];
+    downloadCsv(`alter-customers-${dateKey()}.csv`, rows);
+  }
+
+  function setSalesRangePreset(preset) {
+    const now = new Date();
+    if (preset === "month") {
+      setSalesReportStart(monthStartKey(now));
+      setSalesReportEnd(monthEndKey(now));
+      return;
+    }
+    if (preset === "quarter") {
+      setSalesReportStart(quarterStartKey(now));
+      setSalesReportEnd(quarterEndKey(now));
+      return;
+    }
+    setSalesReportStart(dateKey(now));
+    setSalesReportEnd(dateKey(now));
+  }
+
+  function exportSalesReportCsv() {
+    if (!rangeSalesInvoices.length) {
+      showNotice("No sales found in selected range");
+      return;
+    }
+    const rows = [
+      ["Invoice", "Date", "Customer", "Phone", "Type", "Payment", "Gross", "Discount", "Tax", "Total"],
+      ...rangeSalesInvoices.map((invoice) => [
+        invoice.id,
+        new Date(invoice.date).toLocaleString(),
+        invoice.customer.name,
+        invoice.customer.phone,
+        invoice.invoiceType,
+        invoice.paymentMode,
+        Number(invoice.totals?.gross || 0).toFixed(2),
+        Number(invoice.totals?.discount || 0).toFixed(2),
+        Number(invoice.totals?.tax || 0).toFixed(2),
+        Number(invoice.totals?.total || 0).toFixed(2),
+      ]),
+      [],
+      ["Bills", rangeSalesSummary.count],
+      ["Gross", rangeSalesSummary.gross.toFixed(2)],
+      ["Discount", rangeSalesSummary.discount.toFixed(2)],
+      ["Tax", rangeSalesSummary.tax.toFixed(2)],
+      ["Net Sales", rangeSalesSummary.total.toFixed(2)],
+      ["Cash", rangeSalesSummary.cash.toFixed(2)],
+      ["UPI", rangeSalesSummary.upi.toFixed(2)],
+      ["Card", rangeSalesSummary.card.toFixed(2)],
+      ["Mixed", rangeSalesSummary.mixed.toFixed(2)],
+    ];
+    downloadCsv(`alter-sales-${salesReportStart}-to-${salesReportEnd}.csv`, rows);
   }
 
   function scanBarcode(event) {
@@ -717,6 +870,7 @@ function App() {
 
   async function generateBill(event) {
     event.preventDefault();
+    if (isBilling) return;
     if (!customer.name.trim()) {
       showNotice("Customer name is required");
       return;
@@ -735,37 +889,45 @@ function App() {
     }
     const cartTaxable = cart.reduce((sum, item) => sum + lineTaxable(item), 0);
     const billDiscountRatio = cartTaxable > 0 ? totals.billDiscount / cartTaxable : 0;
-    const invoice = await api(editingInvoiceId ? `/api/invoices/${encodeURIComponent(editingInvoiceId)}` : "/api/invoices", {
-      method: editingInvoiceId ? "PUT" : "POST",
-      body: JSON.stringify({
-        customer,
-        items: cart.map((item) => {
-          const taxable = Math.max(0, lineTaxable(item) * (1 - billDiscountRatio));
-          return {
-            ...item,
-            discount: lineDiscount(item),
-            taxable,
-            gstAmount: invoiceType === "gst" ? taxable * (Number(item.gstRate || 0) / 100) : 0,
-          };
+    setIsBilling(true);
+    try {
+      const invoice = await api(editingInvoiceId ? `/api/invoices/${encodeURIComponent(editingInvoiceId)}` : "/api/invoices", {
+        method: editingInvoiceId ? "PUT" : "POST",
+        body: JSON.stringify({
+          customer,
+          items: cart.map((item) => {
+            const taxable = Math.max(0, lineTaxable(item) * (1 - billDiscountRatio));
+            return {
+              ...item,
+              discount: lineDiscount(item),
+              taxable,
+              gstAmount: invoiceType === "gst" ? taxable * (Number(item.gstRate || 0) / 100) : 0,
+            };
+          }),
+          totals,
+          paymentMode,
+          invoiceType,
+          gstType,
         }),
-        totals,
-        paymentMode,
-        invoiceType,
-        gstType,
-      }),
-    });
-    setLastReturn(null);
-    setSalesPrint(null);
-    setLastInvoice(invoice);
-    applyPrintPage(invoice.invoiceType);
-    setEditingInvoiceId("");
-    setCustomer(emptyCustomer);
-    setCart([]);
-    setAmountPaid(0);
-    setDiscountMode("fixed");
-    setDiscountValue(0);
-    await loadState();
-    window.setTimeout(() => window.print(), 100);
+      });
+      setLastReturn(null);
+      setSalesPrint(null);
+      setLastInvoice(invoice);
+      applyPrintPage(invoice.invoiceType);
+      setEditingInvoiceId("");
+      setCustomer(emptyCustomer);
+      setCustomerLookup("");
+      setCart([]);
+      setAmountPaid(0);
+      setDiscountMode("fixed");
+      setDiscountValue(0);
+      await loadState();
+      window.setTimeout(() => window.print(), 100);
+    } catch (error) {
+      showNotice(error.message);
+    } finally {
+      setIsBilling(false);
+    }
   }
 
   async function clearRecords() {
@@ -903,6 +1065,26 @@ function App() {
                 <div className="panel-title">
                   <h2>Customer</h2>
                 </div>
+                <label className="customer-lookup">
+                  Search saved customer
+                  <input
+                    value={customerLookup}
+                    onChange={(event) => setCustomerLookup(event.target.value)}
+                    placeholder="Name, phone, or address"
+                  />
+                </label>
+                {billingCustomerMatches.length > 0 && (
+                  <div className="customer-match-list">
+                    {billingCustomerMatches.map((item) => (
+                      <button type="button" key={item.key} onClick={() => selectBillingCustomer(item)}>
+                        <span>
+                          <strong>{item.name}</strong>
+                          <small>{item.phone || "No phone"} · {item.invoiceCount} bills · {money(item.totalSpent)}</small>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="field-grid">
                   <label>
                     Name
@@ -1027,8 +1209,8 @@ function App() {
                   </label>
                 </div>
                 <Totals totals={totals} invoiceType={invoiceType} gstType={gstType} />
-                <button className="primary-button" type="submit">
-                  {editingInvoiceId ? "Update invoice" : invoiceType === "gst" ? "Generate A4 GST invoice" : "Generate 2 inch bill"}
+                <button className="primary-button" type="submit" disabled={isBilling}>
+                  {isBilling ? "Processing..." : editingInvoiceId ? "Update invoice" : invoiceType === "gst" ? "Generate A4 GST invoice" : "Generate 2 inch bill"}
                 </button>
               </section>
             </form>
@@ -1175,21 +1357,61 @@ function App() {
           )}
 
           {activeView === "customers" && (
-            <ListPanel title="Customers" search={customerSearch} setSearch={setCustomerSearch} placeholder="Search customers">
-              {filteredCustomers.length ? filteredCustomers.map((item) => (
-                <article className="data-card" key={item.key}>
-                  <div>
-                    <strong>{item.name}</strong>
-                    <span>{item.phone || "No phone"} · {item.invoiceCount} bills · {money(item.totalSpent)}</span>
+            <section className="customer-stack">
+              <section className="panel export-panel">
+                <div className="panel-title">
+                  <h2>Customer exports</h2>
+                  <div className="panel-actions">
+                    <button className="secondary-button" type="button" onClick={exportCustomersCsv}>Download CSV</button>
+                    <a className="secondary-link" href="/api/customers/export.csv">Server CSV</a>
                   </div>
-                  <span>{item.address}</span>
-                </article>
-              )) : <div className="empty-state">No customers saved yet.</div>}
-            </ListPanel>
+                </div>
+                <p className="panel-note">Use this CSV in Excel or your messaging tool for promotional campaigns.</p>
+              </section>
+              <ListPanel title="Customers" search={customerSearch} setSearch={setCustomerSearch} placeholder="Search customers">
+                {filteredCustomers.length ? filteredCustomers.map((item) => (
+                  <article className="data-card" key={item.key}>
+                    <div>
+                      <strong>{item.name}</strong>
+                      <span>{item.phone || "No phone"} · {item.invoiceCount} bills · {money(item.totalSpent)}</span>
+                    </div>
+                    <span>{item.address}</span>
+                  </article>
+                )) : <div className="empty-state">No customers saved yet.</div>}
+              </ListPanel>
+            </section>
           )}
 
           {activeView === "history" && (
             <section className="sales-stack">
+              <section className="panel sales-report-panel">
+                <div className="panel-title">
+                  <h2>Sales report</h2>
+                  <button className="secondary-button" type="button" onClick={exportSalesReportCsv}>Export CSV</button>
+                </div>
+                <div className="sales-range-controls">
+                  <label>
+                    From
+                    <input type="date" value={salesReportStart} onChange={(event) => setSalesReportStart(event.target.value)} />
+                  </label>
+                  <label>
+                    To
+                    <input type="date" value={salesReportEnd} onChange={(event) => setSalesReportEnd(event.target.value)} />
+                  </label>
+                  <div className="panel-actions">
+                    <button className="quiet-button" type="button" onClick={() => setSalesRangePreset("today")}>Today</button>
+                    <button className="quiet-button" type="button" onClick={() => setSalesRangePreset("month")}>This month</button>
+                    <button className="quiet-button" type="button" onClick={() => setSalesRangePreset("quarter")}>This quarter</button>
+                  </div>
+                </div>
+                <div className="sales-report-grid">
+                  <div><span>Bills</span><strong>{rangeSalesSummary.count}</strong></div>
+                  <div><span>Gross</span><strong>{money(rangeSalesSummary.gross)}</strong></div>
+                  <div><span>Discount</span><strong>{money(rangeSalesSummary.discount)}</strong></div>
+                  <div><span>Tax</span><strong>{money(rangeSalesSummary.tax)}</strong></div>
+                  <div><span>Net sales</span><strong>{money(rangeSalesSummary.total)}</strong></div>
+                </div>
+              </section>
               <section className="panel sales-day-panel">
                 <div className="panel-title">
                   <h2>Day wise sales print</h2>
