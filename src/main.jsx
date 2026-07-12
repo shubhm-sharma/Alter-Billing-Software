@@ -14,6 +14,7 @@ const emptyProduct = {
   hsnCode: "",
   gstRate: "18",
   price: "",
+  cost: "",
   stock: "",
   imageUrl: "",
   imageData: "",
@@ -27,6 +28,7 @@ const emptyManualItem = {
   gstRate: "18",
   qty: "1",
   price: "",
+  cost: "",
   discountMode: "percentage",
   discountValue: "25",
   saveToCatalog: false,
@@ -165,6 +167,7 @@ function App() {
   const [catalogSearch, setCatalogSearch] = useState("");
   const [catalogStockFilter, setCatalogStockFilter] = useState("all");
   const [customerSearch, setCustomerSearch] = useState("");
+  const [customerForm, setCustomerForm] = useState(null);
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [returnSearch, setReturnSearch] = useState("");
   const [selectedReturnInvoiceId, setSelectedReturnInvoiceId] = useState("");
@@ -380,20 +383,27 @@ function App() {
   const rangeSalesSummary = useMemo(() => {
     return rangeSalesInvoices.reduce(
       (summary, invoice) => {
+        const cost = invoice.items.reduce((total, item) => {
+          const product = state.products.find((candidate) => candidate.id === item.productId || candidate.barcode === item.barcode);
+          const unitCost = Number(item.cost ?? product?.cost ?? 0);
+          return total + Math.max(0, Number(item.qty || 0) * unitCost);
+        }, 0);
         summary.count += 1;
         summary.gross += Number(invoice.totals?.gross || 0);
         summary.discount += Number(invoice.totals?.discount || 0);
         summary.tax += Number(invoice.totals?.tax || 0);
         summary.total += Number(invoice.totals?.total || 0);
+        summary.cost += cost;
+        summary.profit += Number(invoice.totals?.total || 0) - cost;
         summary.cash += invoice.paymentMode === "Cash" ? Number(invoice.totals?.total || 0) : 0;
         summary.upi += invoice.paymentMode === "UPI" ? Number(invoice.totals?.total || 0) : 0;
         summary.card += invoice.paymentMode === "Card" ? Number(invoice.totals?.total || 0) : 0;
         summary.mixed += invoice.paymentMode === "Mixed" ? Number(invoice.totals?.total || 0) : 0;
         return summary;
       },
-      { count: 0, gross: 0, discount: 0, tax: 0, total: 0, cash: 0, upi: 0, card: 0, mixed: 0 }
+      { count: 0, gross: 0, discount: 0, tax: 0, total: 0, cost: 0, profit: 0, cash: 0, upi: 0, card: 0, mixed: 0 }
     );
-  }, [rangeSalesInvoices]);
+  }, [rangeSalesInvoices, state.products]);
 
   const returnInvoiceMatches = useMemo(() => {
     if (!state) return [];
@@ -460,6 +470,7 @@ function App() {
           imageUrl: product.imageUrl || "",
           qty: 1,
           price: Number(product.price || 0),
+          cost: Number(product.cost || 0),
           discount: 0,
           discountMode: "percentage",
           discountValue: 25,
@@ -477,6 +488,8 @@ function App() {
       name: savedCustomer.name || "",
       phone: savedCustomer.phone || "",
       address: savedCustomer.address || "",
+      gstin: savedCustomer.gstin || "",
+      stateCode: savedCustomer.stateCode || "",
     });
     setCustomerLookup("");
     showNotice(`${savedCustomer.name} linked`);
@@ -484,17 +497,46 @@ function App() {
 
   function exportCustomersCsv() {
     const rows = [
-      ["Name", "Phone", "Address", "Invoice Count", "Total Spent", "Last Purchase"],
+      ["Name", "Phone", "Address", "GSTIN", "State Code", "Invoice Count", "Total Spent", "Last Purchase"],
       ...state.customers.map((item) => [
         item.name,
         item.phone,
         item.address,
+        item.gstin || "",
+        item.stateCode || "",
         item.invoiceCount,
         Number(item.totalSpent || 0).toFixed(2),
         item.lastPurchase || "",
       ]),
     ];
     downloadCsv(`alter-customers-${dateKey()}.csv`, rows);
+  }
+
+  function startEditCustomer(item) {
+    setCustomerForm({
+      key: item.key,
+      name: item.name || "",
+      phone: item.phone || "",
+      address: item.address || "",
+      gstin: item.gstin || "",
+      stateCode: item.stateCode || "",
+    });
+  }
+
+  async function saveCustomer(event) {
+    event.preventDefault();
+    if (!customerForm?.key) return;
+    try {
+      const saved = await api(`/api/customers/${encodeURIComponent(customerForm.key)}`, {
+        method: "PUT",
+        body: JSON.stringify(customerForm),
+      });
+      setCustomerForm(null);
+      await loadState();
+      showNotice(`${saved.name} updated`);
+    } catch (error) {
+      showNotice(error.message);
+    }
   }
 
   function setSalesRangePreset(preset) {
@@ -519,25 +561,37 @@ function App() {
       return;
     }
     const rows = [
-      ["Invoice", "Date", "Customer", "Phone", "Type", "Payment", "Gross", "Discount", "Tax", "Total"],
-      ...rangeSalesInvoices.map((invoice) => [
-        invoice.id,
-        new Date(invoice.date).toLocaleString(),
-        invoice.customer.name,
-        invoice.customer.phone,
-        invoice.invoiceType,
-        invoice.paymentMode,
-        Number(invoice.totals?.gross || 0).toFixed(2),
-        Number(invoice.totals?.discount || 0).toFixed(2),
-        Number(invoice.totals?.tax || 0).toFixed(2),
-        Number(invoice.totals?.total || 0).toFixed(2),
-      ]),
+      ["Invoice", "Date", "Customer", "Phone", "Type", "Payment", "Gross", "Discount", "Tax", "Total", "Cost", "Profit"],
+      ...rangeSalesInvoices.map((invoice) => {
+        const cost = invoice.items.reduce((total, item) => {
+          const product = state.products.find((candidate) => candidate.id === item.productId || candidate.barcode === item.barcode);
+          const unitCost = Number(item.cost ?? product?.cost ?? 0);
+          return total + Math.max(0, Number(item.qty || 0) * unitCost);
+        }, 0);
+        const total = Number(invoice.totals?.total || 0);
+        return [
+          invoice.id,
+          new Date(invoice.date).toLocaleString(),
+          invoice.customer.name,
+          invoice.customer.phone,
+          invoice.invoiceType,
+          invoice.paymentMode,
+          Number(invoice.totals?.gross || 0).toFixed(2),
+          Number(invoice.totals?.discount || 0).toFixed(2),
+          Number(invoice.totals?.tax || 0).toFixed(2),
+          total.toFixed(2),
+          cost.toFixed(2),
+          (total - cost).toFixed(2),
+        ];
+      }),
       [],
       ["Bills", rangeSalesSummary.count],
       ["Gross", rangeSalesSummary.gross.toFixed(2)],
       ["Discount", rangeSalesSummary.discount.toFixed(2)],
       ["Tax", rangeSalesSummary.tax.toFixed(2)],
       ["Net Sales", rangeSalesSummary.total.toFixed(2)],
+      ["Cost", rangeSalesSummary.cost.toFixed(2)],
+      ["Profit", rangeSalesSummary.profit.toFixed(2)],
       ["Cash", rangeSalesSummary.cash.toFixed(2)],
       ["UPI", rangeSalesSummary.upi.toFixed(2)],
       ["Card", rangeSalesSummary.card.toFixed(2)],
@@ -641,8 +695,9 @@ function App() {
       const product = state.products.find((candidate) => candidate.id === item.productId || candidate.barcode === item.barcode);
       return {
         ...item,
-        imageUrl: product?.imageUrl || "",
-        discountMode: item.discountMode === "fixed" ? "fixed" : "percentage",
+          imageUrl: product?.imageUrl || "",
+          cost: Number(item.cost ?? product?.cost ?? 0),
+          discountMode: item.discountMode === "fixed" ? "fixed" : "percentage",
         discountValue: Number(item.discountValue || 0),
       };
     }));
@@ -746,6 +801,7 @@ function App() {
     event.preventDefault();
     const name = manualItem.name.trim();
     const price = Math.max(0, Number(manualItem.price) || 0);
+    const cost = Math.max(0, Number(manualItem.cost) || 0);
     const qty = Math.max(1, Number(manualItem.qty) || 1);
     if (!name || price <= 0) {
       showNotice("Manual item name and price are required");
@@ -769,6 +825,7 @@ function App() {
         hsnCode: manualItem.hsnCode.trim(),
         gstRate: Number(manualItem.gstRate || 0),
         price,
+        cost,
         imageUrl: "",
       };
       if (manualItem.saveToCatalog) {
@@ -781,6 +838,7 @@ function App() {
             hsnCode: manualItem.hsnCode.trim(),
             gstRate: Number(manualItem.gstRate || 0),
             price,
+            cost,
             stock: Math.max(0, Number(manualItem.stock) || 0),
           }),
         });
@@ -797,6 +855,7 @@ function App() {
           imageUrl: product.imageUrl || "",
           qty,
           price,
+          cost,
           discount: 0,
           discountMode: manualItem.discountMode,
           discountValue: Math.max(0, Number(manualItem.discountValue) || 0),
@@ -1313,6 +1372,10 @@ function App() {
                     <input min="0" type="number" value={productForm.price} onChange={(event) => setProductForm({ ...productForm, price: event.target.value })} required />
                   </label>
                   <label>
+                    Cost
+                    <input min="0" step="0.01" type="number" value={productForm.cost ?? ""} onChange={(event) => setProductForm({ ...productForm, cost: event.target.value })} />
+                  </label>
+                  <label>
                     Stock
                     <input min="0" type="number" value={productForm.stock} onChange={(event) => setProductForm({ ...productForm, stock: event.target.value })} />
                   </label>
@@ -1360,6 +1423,7 @@ function App() {
                           <span>{product.category || "Uncategorised"}</span>
                           <span>HSN {product.hsnCode || "Not set"}</span>
                           <span>GST {product.gstRate || 0}%</span>
+                          <span>Cost {money(product.cost || 0)}</span>
                           <span className={Number(product.stock) > 0 ? "stock-ok" : "stock-empty"}>Stock {product.stock}</span>
                         </div>
                       </div>
@@ -1389,6 +1453,37 @@ function App() {
                 </div>
                 <p className="panel-note">Use this CSV in Excel or your messaging tool for promotional campaigns.</p>
               </section>
+              {customerForm && (
+                <form className="panel" onSubmit={saveCustomer}>
+                  <div className="panel-title">
+                    <h2>Edit customer</h2>
+                    <button className="quiet-button" type="button" onClick={() => setCustomerForm(null)}>Cancel</button>
+                  </div>
+                  <div className="field-grid">
+                    <label>
+                      Name
+                      <input value={customerForm.name} onChange={(event) => setCustomerForm({ ...customerForm, name: event.target.value })} required />
+                    </label>
+                    <label>
+                      Phone
+                      <input value={customerForm.phone} onChange={(event) => setCustomerForm({ ...customerForm, phone: event.target.value })} />
+                    </label>
+                    <label className="wide-field">
+                      Address
+                      <textarea rows="2" value={customerForm.address} onChange={(event) => setCustomerForm({ ...customerForm, address: event.target.value })} />
+                    </label>
+                    <label>
+                      GSTIN
+                      <input value={customerForm.gstin} onChange={(event) => setCustomerForm({ ...customerForm, gstin: event.target.value.toUpperCase() })} />
+                    </label>
+                    <label>
+                      State code
+                      <input maxLength="2" value={customerForm.stateCode} onChange={(event) => setCustomerForm({ ...customerForm, stateCode: event.target.value })} />
+                    </label>
+                  </div>
+                  <button className="primary-button" type="submit">Save customer</button>
+                </form>
+              )}
               <ListPanel title="Customers" search={customerSearch} setSearch={setCustomerSearch} placeholder="Search customers">
                 {filteredCustomers.length ? filteredCustomers.map((item) => (
                   <article className="data-card" key={item.key}>
@@ -1397,6 +1492,7 @@ function App() {
                       <span>{item.phone || "No phone"} · {item.invoiceCount} bills · {money(item.totalSpent)}</span>
                     </div>
                     <span>{item.address}</span>
+                    <button type="button" onClick={() => startEditCustomer(item)}>Edit</button>
                   </article>
                 )) : <div className="empty-state">No customers saved yet.</div>}
               </ListPanel>
@@ -1407,7 +1503,7 @@ function App() {
             <section className="sales-stack">
               <section className="panel sales-report-panel">
                 <div className="panel-title">
-                  <h2>Sales report</h2>
+                  <h2>Sales / P&L report</h2>
                   <button className="secondary-button" type="button" onClick={exportSalesReportCsv}>Export CSV</button>
                 </div>
                 <div className="sales-range-controls">
@@ -1431,6 +1527,8 @@ function App() {
                   <div><span>Discount</span><strong>{money(rangeSalesSummary.discount)}</strong></div>
                   <div><span>Tax</span><strong>{money(rangeSalesSummary.tax)}</strong></div>
                   <div><span>Net sales</span><strong>{money(rangeSalesSummary.total)}</strong></div>
+                  <div><span>Cost</span><strong>{money(rangeSalesSummary.cost)}</strong></div>
+                  <div><span>Profit</span><strong>{money(rangeSalesSummary.profit)}</strong></div>
                 </div>
               </section>
               <section className="panel sales-day-panel">
@@ -1775,6 +1873,10 @@ function App() {
               <label>
                 Unit price
                 <input min="0" step="0.01" type="number" value={manualItem.price} onChange={(event) => setManualItem({ ...manualItem, price: event.target.value })} required />
+              </label>
+              <label>
+                Unit cost optional
+                <input min="0" step="0.01" type="number" value={manualItem.cost} onChange={(event) => setManualItem({ ...manualItem, cost: event.target.value })} placeholder="Leave blank if unknown" />
               </label>
               <label>
                 Discount type

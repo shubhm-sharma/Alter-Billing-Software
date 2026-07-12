@@ -206,6 +206,7 @@ function buildInvoice(db, body, { id, date } = {}) {
       gstRate: Math.max(0, Number(item.gstRate) || 0),
       qty: Math.max(1, Number(item.qty) || 1),
       price: Math.max(0, Number(item.price) || 0),
+      cost: Math.max(0, Number(item.cost) || 0),
       discount: Math.max(0, Number(item.discount) || 0),
       discountMode: item.discountMode === "percentage" ? "percentage" : "fixed",
       discountValue: Math.max(0, Number(item.discountValue) || 0),
@@ -248,6 +249,7 @@ function normalizeProduct(input, existing = {}) {
     hsnCode: String(input.hsnCode || "").trim(),
     gstRate: Math.max(0, Number(input.gstRate) || 0),
     price: Math.max(0, Number(input.price) || 0),
+    cost: Math.max(0, Number(input.cost) || 0),
     stock: Math.max(0, Number(input.stock) || 0),
     imageUrl: existing.imageUrl || "",
   };
@@ -284,6 +286,8 @@ function upsertCustomer(db, invoice) {
     existing.name = invoice.customer.name;
     existing.phone = invoice.customer.phone;
     existing.address = invoice.customer.address;
+    existing.gstin = invoice.customer.gstin;
+    existing.stateCode = invoice.customer.stateCode;
     existing.invoiceCount += 1;
     existing.totalSpent += invoice.totals.total;
     existing.lastPurchase = invoice.date;
@@ -294,6 +298,8 @@ function upsertCustomer(db, invoice) {
     name: invoice.customer.name,
     phone: invoice.customer.phone,
     address: invoice.customer.address,
+    gstin: invoice.customer.gstin,
+    stateCode: invoice.customer.stateCode,
     invoiceCount: 1,
     totalSpent: invoice.totals.total,
     lastPurchase: invoice.date,
@@ -311,6 +317,8 @@ function summarizeCustomers(invoices) {
       existing.name = invoice.customer.name;
       existing.phone = invoice.customer.phone;
       existing.address = invoice.customer.address;
+      existing.gstin = invoice.customer.gstin;
+      existing.stateCode = invoice.customer.stateCode;
       existing.invoiceCount += 1;
       existing.totalSpent += Number(invoice.totals.total || 0);
       if (invoice.date > existing.lastPurchase) existing.lastPurchase = invoice.date;
@@ -320,6 +328,8 @@ function summarizeCustomers(invoices) {
         name: invoice.customer.name,
         phone: invoice.customer.phone,
         address: invoice.customer.address,
+        gstin: invoice.customer.gstin,
+        stateCode: invoice.customer.stateCode,
         invoiceCount: 1,
         totalSpent: Number(invoice.totals.total || 0),
         lastPurchase: invoice.date,
@@ -344,6 +354,8 @@ async function upsertCustomerInMongo(invoice) {
         name: invoice.customer.name,
         phone: invoice.customer.phone,
         address: invoice.customer.address,
+        gstin: invoice.customer.gstin,
+        stateCode: invoice.customer.stateCode,
         lastPurchase: invoice.date,
       },
       $setOnInsert: { key },
@@ -414,6 +426,8 @@ app.get("/api/customers/export.csv", async (req, res, next) => {
       { label: "Name", value: (customer) => customer.name },
       { label: "Phone", value: (customer) => customer.phone },
       { label: "Address", value: (customer) => customer.address },
+      { label: "GSTIN", value: (customer) => customer.gstin },
+      { label: "State Code", value: (customer) => customer.stateCode },
       { label: "Invoice Count", value: (customer) => customer.invoiceCount },
       { label: "Total Spent", value: (customer) => Number(customer.totalSpent || 0).toFixed(2) },
       { label: "Last Purchase", value: (customer) => customer.lastPurchase },
@@ -421,6 +435,59 @@ app.get("/api/customers/export.csv", async (req, res, next) => {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="alter-customers-${new Date().toISOString().slice(0, 10)}.csv"`);
     res.send(csv);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/api/customers/:key", async (req, res, next) => {
+  try {
+    const db = await readDb();
+    const oldKey = decodeURIComponent(req.params.key);
+    const updatedCustomer = {
+      name: String(req.body.name || "").trim(),
+      phone: String(req.body.phone || "").trim(),
+      address: String(req.body.address || "").trim(),
+      gstin: String(req.body.gstin || "").trim().toUpperCase(),
+      stateCode: String(req.body.stateCode || "").trim(),
+    };
+    if (!updatedCustomer.name) {
+      res.status(400).json({ error: "Customer name is required." });
+      return;
+    }
+
+    const affectedInvoices = db.invoices.filter((invoice) => {
+      const phone = invoice.customer.phone.trim();
+      const key = phone || invoice.customer.name.trim().toLowerCase();
+      return key === oldKey;
+    });
+    if (!affectedInvoices.length) {
+      res.status(404).json({ error: "Customer was not found." });
+      return;
+    }
+
+    for (const invoice of affectedInvoices) {
+      invoice.customer = { ...invoice.customer, ...updatedCustomer };
+      invoice.editedAt = new Date().toISOString();
+    }
+    rebuildCustomers(db);
+    const customer = db.customers.find((item) => {
+      const phone = item.phone?.trim();
+      const key = phone || item.name?.trim().toLowerCase();
+      return key === (updatedCustomer.phone || updatedCustomer.name.toLowerCase());
+    });
+
+    if (mongoUri) {
+      const mongoDb = await getMongoDb();
+      await Promise.all([
+        replaceMongoCollection(mongoDb, "invoices", db.invoices),
+        replaceMongoCollection(mongoDb, "customers", db.customers),
+      ]);
+    } else {
+      await writeDb(db);
+    }
+
+    res.json(customer);
   } catch (error) {
     next(error);
   }
