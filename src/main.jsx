@@ -324,6 +324,15 @@ function App() {
       .slice(0, 6);
   }, [state, customerLookup]);
 
+  const phoneCustomerMatches = useMemo(() => {
+    if (!state || !customer.phone.trim()) return [];
+    const digits = customer.phone.replace(/\D/g, "");
+    if (digits.length < 3) return [];
+    return state.customers
+      .filter((item) => item.phone?.replace(/\D/g, "").includes(digits))
+      .slice(0, 5);
+  }, [state, customer.phone]);
+
   const filteredInvoices = useMemo(() => {
     if (!state) return [];
     const query = invoiceSearch.trim().toLowerCase();
@@ -1094,6 +1103,18 @@ function App() {
                     Phone
                     <input value={customer.phone} onChange={(event) => setCustomer({ ...customer, phone: event.target.value })} />
                   </label>
+                  {phoneCustomerMatches.length > 0 && (
+                    <div className="customer-match-list phone-match-list">
+                      {phoneCustomerMatches.map((item) => (
+                        <button type="button" key={item.key} onClick={() => selectBillingCustomer(item)}>
+                          <span>
+                            <strong>{item.name}</strong>
+                            <small>{item.phone || "No phone"} · {item.invoiceCount} bills · {money(item.totalSpent)}</small>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <label className="wide-field">
                     Address
                     <textarea rows="2" value={customer.address} onChange={(event) => setCustomer({ ...customer, address: event.target.value })} />

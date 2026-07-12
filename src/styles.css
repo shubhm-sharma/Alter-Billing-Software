@@ -745,6 +745,11 @@ textarea:focus {
   color: var(--muted);
 }
 
+.phone-match-list {
+  grid-column: 1 / -1;
+  margin: -6px 0 0;
+}
+
 .sales-stack {
   display: grid;
   gap: 18px;
