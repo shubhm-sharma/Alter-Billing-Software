@@ -381,10 +381,11 @@ function App() {
   }, [state, salesReportStart, salesReportEnd]);
 
   const rangeSalesSummary = useMemo(() => {
+    const products = state?.products || [];
     return rangeSalesInvoices.reduce(
       (summary, invoice) => {
         const cost = invoice.items.reduce((total, item) => {
-          const product = state.products.find((candidate) => candidate.id === item.productId || candidate.barcode === item.barcode);
+          const product = products.find((candidate) => candidate.id === item.productId || candidate.barcode === item.barcode);
           const unitCost = Number(item.cost ?? product?.cost ?? 0);
           return total + Math.max(0, Number(item.qty || 0) * unitCost);
         }, 0);
@@ -403,7 +404,7 @@ function App() {
       },
       { count: 0, gross: 0, discount: 0, tax: 0, total: 0, cost: 0, profit: 0, cash: 0, upi: 0, card: 0, mixed: 0 }
     );
-  }, [rangeSalesInvoices, state.products]);
+  }, [rangeSalesInvoices, state?.products]);
 
   const returnInvoiceMatches = useMemo(() => {
     if (!state) return [];
