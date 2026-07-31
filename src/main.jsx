@@ -177,6 +177,7 @@ function App() {
   const [settlementMode, setSettlementMode] = useState("Cash");
   const [replacementSearch, setReplacementSearch] = useState("");
   const [replacementItems, setReplacementItems] = useState([]);
+  const [exchangeManualItem, setExchangeManualItem] = useState(emptyManualItem);
   const [lastInvoice, setLastInvoice] = useState(null);
   const [lastReturn, setLastReturn] = useState(null);
   const [editingInvoiceId, setEditingInvoiceId] = useState("");
@@ -672,6 +673,74 @@ function App() {
     setReplacementSearch("");
   }
 
+  async function addManualReplacement() {
+    const name = exchangeManualItem.name.trim();
+    const price = Math.max(0, Number(exchangeManualItem.price) || 0);
+    const cost = Math.max(0, Number(exchangeManualItem.cost) || 0);
+    const qty = Math.max(1, Number(exchangeManualItem.qty) || 1);
+    if (!name || price <= 0) {
+      showNotice("Replacement item name and price are required");
+      return;
+    }
+    if (exchangeManualItem.saveToCatalog && !exchangeManualItem.barcode.trim()) {
+      showNotice("Enter a barcode to save this replacement product");
+      return;
+    }
+
+    try {
+      let product = {
+        id: `manual-exchange-${Date.now()}`,
+        name,
+        barcode: exchangeManualItem.barcode.trim(),
+        category: exchangeManualItem.category.trim(),
+        hsnCode: exchangeManualItem.hsnCode.trim(),
+        gstRate: Number(exchangeManualItem.gstRate || 0),
+        price,
+        cost,
+        imageUrl: "",
+        manual: true,
+      };
+
+      if (exchangeManualItem.saveToCatalog) {
+        product = await api("/api/products", {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            barcode: exchangeManualItem.barcode.trim(),
+            category: exchangeManualItem.category.trim(),
+            hsnCode: exchangeManualItem.hsnCode.trim(),
+            gstRate: Number(exchangeManualItem.gstRate || 0),
+            price,
+            cost,
+            stock: Math.max(0, Number(exchangeManualItem.stock) || 0),
+          }),
+        });
+        await loadState();
+      }
+
+      setReplacementItems((current) => [
+        ...current,
+        {
+          productId: product.id,
+          name: product.name,
+          barcode: product.barcode || "",
+          imageUrl: product.imageUrl || "",
+          qty,
+          price,
+          cost,
+          discountMode: exchangeManualItem.discountMode,
+          discountValue: Math.max(0, Number(exchangeManualItem.discountValue) || 0),
+          discount: 0,
+          manual: !exchangeManualItem.saveToCatalog,
+        },
+      ]);
+      setExchangeManualItem(emptyManualItem);
+      showNotice(exchangeManualItem.saveToCatalog ? "Replacement product saved and added" : "Manual replacement added");
+    } catch (error) {
+      showNotice(error.message);
+    }
+  }
+
   function updateReplacementItem(index, patch) {
     setReplacementItems((current) =>
       current.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item))
@@ -779,6 +848,11 @@ function App() {
           items,
           replacements: replacementItems.map((item) => ({
             productId: item.productId,
+            name: item.name,
+            barcode: item.barcode,
+            price: item.price,
+            cost: item.cost,
+            manual: item.manual,
             qty: item.qty,
             discount: lineDiscount(item),
           })),
@@ -1689,10 +1763,130 @@ function App() {
                           ))}
                         </div>
                       )}
+                      <div className="exchange-manual-form">
+                        <div className="panel-title compact-title">
+                          <h3>Manual replacement</h3>
+                        </div>
+                        <div className="field-grid compact-fields">
+                          <label>
+                            Item name
+                            <input
+                              value={exchangeManualItem.name}
+                              onChange={(event) => setExchangeManualItem({ ...exchangeManualItem, name: event.target.value })}
+                              placeholder="Unregistered product"
+                            />
+                          </label>
+                          <label>
+                            Qty
+                            <input
+                              min="1"
+                              type="number"
+                              value={exchangeManualItem.qty}
+                              onChange={(event) => setExchangeManualItem({ ...exchangeManualItem, qty: event.target.value })}
+                            />
+                          </label>
+                          <label>
+                            Price
+                            <input
+                              min="0"
+                              step="0.01"
+                              type="number"
+                              value={exchangeManualItem.price}
+                              onChange={(event) => setExchangeManualItem({ ...exchangeManualItem, price: event.target.value })}
+                            />
+                          </label>
+                          <label>
+                            Cost optional
+                            <input
+                              min="0"
+                              step="0.01"
+                              type="number"
+                              value={exchangeManualItem.cost}
+                              onChange={(event) => setExchangeManualItem({ ...exchangeManualItem, cost: event.target.value })}
+                              placeholder="For profit report"
+                            />
+                          </label>
+                          <label>
+                            Discount type
+                            <select
+                              value={exchangeManualItem.discountMode}
+                              onChange={(event) => setExchangeManualItem({ ...exchangeManualItem, discountMode: event.target.value })}
+                            >
+                              <option value="percentage">Percentage</option>
+                              <option value="fixed">Fixed amount</option>
+                            </select>
+                          </label>
+                          <label>
+                            {exchangeManualItem.discountMode === "percentage" ? "Discount %" : "Discount amount"}
+                            <input
+                              min="0"
+                              max={exchangeManualItem.discountMode === "percentage" ? "100" : undefined}
+                              step="0.01"
+                              type="number"
+                              value={exchangeManualItem.discountValue}
+                              onChange={(event) => setExchangeManualItem({ ...exchangeManualItem, discountValue: event.target.value })}
+                            />
+                          </label>
+                          <label>
+                            Barcode
+                            <input
+                              value={exchangeManualItem.barcode}
+                              onChange={(event) => setExchangeManualItem({ ...exchangeManualItem, barcode: event.target.value })}
+                              placeholder="Optional unless saving"
+                            />
+                          </label>
+                          <label>
+                            Category
+                            <input
+                              value={exchangeManualItem.category}
+                              onChange={(event) => setExchangeManualItem({ ...exchangeManualItem, category: event.target.value })}
+                            />
+                          </label>
+                          <label>
+                            HSN code
+                            <input
+                              value={exchangeManualItem.hsnCode}
+                              onChange={(event) => setExchangeManualItem({ ...exchangeManualItem, hsnCode: event.target.value })}
+                            />
+                          </label>
+                          <label>
+                            GST rate %
+                            <input
+                              min="0"
+                              step="0.01"
+                              type="number"
+                              value={exchangeManualItem.gstRate}
+                              onChange={(event) => setExchangeManualItem({ ...exchangeManualItem, gstRate: event.target.value })}
+                            />
+                          </label>
+                        </div>
+                        <label className="checkbox-row">
+                          <input
+                            type="checkbox"
+                            checked={exchangeManualItem.saveToCatalog}
+                            onChange={(event) => setExchangeManualItem({ ...exchangeManualItem, saveToCatalog: event.target.checked })}
+                          />
+                          Save this replacement in products
+                        </label>
+                        {exchangeManualItem.saveToCatalog && (
+                          <label className="stock-field">
+                            Opening stock
+                            <input
+                              min="0"
+                              type="number"
+                              value={exchangeManualItem.stock}
+                              onChange={(event) => setExchangeManualItem({ ...exchangeManualItem, stock: event.target.value })}
+                            />
+                          </label>
+                        )}
+                        <button className="secondary-button" type="button" onClick={addManualReplacement}>
+                          Add manual replacement
+                        </button>
+                      </div>
                       <div className="replacement-cart">
                         {replacementItems.map((item, index) => (
                           <div className="replacement-row" key={item.productId}>
-                            <div><strong>{item.name}</strong><small>{item.barcode}</small></div>
+                            <div><strong>{item.name}</strong><small>{item.barcode || "Manual item"}</small></div>
                             <input
                               aria-label={`${item.name} exchange quantity`}
                               min="1"

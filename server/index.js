@@ -717,20 +717,24 @@ app.post("/api/returns", async (req, res, next) => {
       for (const requested of Array.isArray(req.body.replacements) ? req.body.replacements : []) {
         const product = db.products.find((item) => item.id === requested.productId);
         const qty = Math.max(1, Number(requested.qty) || 1);
-        if (!product) {
-          res.status(400).json({ error: "One of the replacement products no longer exists." });
+        const name = product?.name || String(requested.name || "").trim();
+        const price = product ? Number(product.price || 0) : Math.max(0, Number(requested.price) || 0);
+        if (!product && (!name || price <= 0)) {
+          res.status(400).json({ error: "Manual replacement items need a name and price." });
           return;
         }
-        const gross = qty * Number(product.price || 0);
+        const gross = qty * price;
         const discount = Math.min(gross, Math.max(0, Number(requested.discount) || 0));
         replacements.push({
-          productId: product.id,
-          name: product.name,
-          barcode: product.barcode,
+          productId: product?.id || String(requested.productId || `manual-${Date.now()}`),
+          name,
+          barcode: product?.barcode || String(requested.barcode || "").trim(),
           qty,
-          price: Number(product.price || 0),
+          price,
+          cost: product ? Number(product.cost || 0) : Math.max(0, Number(requested.cost) || 0),
           discount,
           amount: gross - discount,
+          manual: !product,
         });
       }
       if (!replacements.length) {
@@ -762,6 +766,7 @@ app.post("/api/returns", async (req, res, next) => {
       if (product) product.stock = Number(product.stock || 0) + item.qty;
     }
     for (const item of replacements) {
+      if (item.manual) continue;
       const product = db.products.find((candidate) => candidate.id === item.productId);
       if (product) product.stock = Math.max(0, Number(product.stock || 0) - item.qty);
     }
@@ -778,8 +783,8 @@ app.post("/api/returns", async (req, res, next) => {
         ...replacements.map((item) => ({
           productId: item.productId,
           barcode: item.barcode,
-          qty: -item.qty,
-        })),
+          qty: item.manual ? 0 : -item.qty,
+        })).filter((item) => item.qty !== 0),
       ]);
     } else {
       db.returns.push(record);
