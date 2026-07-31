@@ -227,6 +227,62 @@ function validateInvoiceInput(body) {
   return "";
 }
 
+function buildExchangeInvoice(db, sourceInvoice, replacements, exchangeRecord) {
+  const items = replacements.map((item) => {
+    const discount = Math.max(0, Number(item.discount) || 0);
+    const taxable = Math.max(0, Number(item.amount || 0));
+    const gstRate = Math.max(0, Number(item.gstRate) || 0);
+    return {
+      productId: item.productId || "",
+      name: String(item.name || "").trim(),
+      barcode: String(item.barcode || "").trim(),
+      hsnCode: String(item.hsnCode || "").trim(),
+      gstRate,
+      qty: Math.max(1, Number(item.qty) || 1),
+      price: Math.max(0, Number(item.price) || 0),
+      cost: Math.max(0, Number(item.cost) || 0),
+      discount,
+      discountMode: item.discountMode === "fixed" ? "fixed" : "percentage",
+      discountValue: Math.max(0, Number(item.discountValue) || 0),
+      taxable,
+      gstAmount: sourceInvoice.invoiceType === "gst" ? taxable * (gstRate / 100) : 0,
+    };
+  });
+  const gross = items.reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.price || 0), 0);
+  const itemDiscount = items.reduce((sum, item) => sum + Number(item.discount || 0), 0);
+  const taxable = items.reduce((sum, item) => sum + Number(item.taxable || 0), 0);
+  const tax = items.reduce((sum, item) => sum + Number(item.gstAmount || 0), 0);
+  const total = taxable + tax;
+  return {
+    id: exchangeRecord.exchangeInvoiceId,
+    date: exchangeRecord.date,
+    customer: { ...sourceInvoice.customer },
+    items,
+    totals: {
+      gross,
+      itemDiscount,
+      billDiscount: 0,
+      discount: itemDiscount,
+      discountMode: "fixed",
+      discountValue: 0,
+      taxable,
+      tax,
+      total,
+      paid: Math.max(0, Number(exchangeRecord.difference || 0)),
+      balance: 0,
+      exchangeCredit: Number(exchangeRecord.creditTotal || 0),
+      exchangeDifference: Number(exchangeRecord.difference || 0),
+    },
+    invoiceType: sourceInvoice.invoiceType === "gst" ? "gst" : "regular",
+    gstType: sourceInvoice.gstType === "interstate" ? "interstate" : "intrastate",
+    paymentMode: exchangeRecord.settlementMode,
+    shop: { ...db.settings },
+    source: "exchange",
+    exchangeId: exchangeRecord.id,
+    originalInvoiceId: sourceInvoice.id,
+  };
+}
+
 function csvEscape(value) {
   const text = String(value ?? "");
   return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
@@ -729,16 +785,24 @@ app.post("/api/returns", async (req, res, next) => {
           productId: product?.id || String(requested.productId || `manual-${Date.now()}`),
           name,
           barcode: product?.barcode || String(requested.barcode || "").trim(),
+          hsnCode: product?.hsnCode || String(requested.hsnCode || "").trim(),
+          gstRate: product ? Number(product.gstRate || 0) : Math.max(0, Number(requested.gstRate) || 0),
           qty,
           price,
           cost: product ? Number(product.cost || 0) : Math.max(0, Number(requested.cost) || 0),
           discount,
+          discountMode: requested.discountMode === "fixed" ? "fixed" : "percentage",
+          discountValue: Math.max(0, Number(requested.discountValue) || 0),
           amount: gross - discount,
           manual: !product,
         });
       }
       if (!replacements.length) {
         res.status(400).json({ error: "Add at least one replacement product for an exchange." });
+        return;
+      }
+      if (invoice.invoiceType === "gst" && replacements.some((item) => !item.hsnCode || Number(item.gstRate || 0) <= 0)) {
+        res.status(400).json({ error: "GST exchange replacements need an HSN code and GST rate." });
         return;
       }
     }
@@ -760,6 +824,11 @@ app.post("/api/returns", async (req, res, next) => {
       replacementTotal,
       difference: replacementTotal - creditTotal,
     };
+    let exchangeInvoice = null;
+    if (type === "exchange") {
+      record.exchangeInvoiceId = await invoiceId(db);
+      exchangeInvoice = buildExchangeInvoice(db, invoice, replacements, record);
+    }
 
     for (const item of returnedItems) {
       const product = db.products.find((candidate) => candidate.id === item.productId || candidate.barcode === item.barcode);
@@ -774,6 +843,10 @@ app.post("/api/returns", async (req, res, next) => {
     if (mongoUri) {
       const mongoDb = await getMongoDb();
       await mongoDb.collection("returns").insertOne(record);
+      if (exchangeInvoice) {
+        await mongoDb.collection("invoices").insertOne(exchangeInvoice);
+        await upsertCustomerInMongo(exchangeInvoice);
+      }
       await adjustMongoStock([
         ...returnedItems.map((item) => ({
           productId: item.productId,
@@ -788,6 +861,10 @@ app.post("/api/returns", async (req, res, next) => {
       ]);
     } else {
       db.returns.push(record);
+      if (exchangeInvoice) {
+        db.invoices.push(exchangeInvoice);
+        upsertCustomer(db, exchangeInvoice);
+      }
       await writeDb(db);
     }
     res.json(record);

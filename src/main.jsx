@@ -661,9 +661,12 @@ function App() {
           productId: product.id,
           name: product.name,
           barcode: product.barcode,
+          hsnCode: product.hsnCode || "",
+          gstRate: Number(product.gstRate || 0),
           imageUrl: product.imageUrl || "",
           qty: 1,
           price: Number(product.price || 0),
+          cost: Number(product.cost || 0),
           discountMode: "percentage",
           discountValue: 25,
           discount: 0,
@@ -724,6 +727,8 @@ function App() {
           productId: product.id,
           name: product.name,
           barcode: product.barcode || "",
+          hsnCode: product.hsnCode || "",
+          gstRate: Number(product.gstRate || 0),
           imageUrl: product.imageUrl || "",
           qty,
           price,
@@ -850,11 +855,15 @@ function App() {
             productId: item.productId,
             name: item.name,
             barcode: item.barcode,
+            hsnCode: item.hsnCode,
+            gstRate: item.gstRate,
             price: item.price,
             cost: item.cost,
             manual: item.manual,
             qty: item.qty,
             discount: lineDiscount(item),
+            discountMode: item.discountMode,
+            discountValue: item.discountValue,
           })),
           reason: returnReason,
           settlementMode,
@@ -1966,7 +1975,14 @@ function App() {
                     <article className="data-card" key={record.id}>
                       <div>
                         <strong>{record.id} · {record.type === "exchange" ? "Exchange" : "Return"}</strong>
-                        <span>{record.invoiceId} · {record.customer.name} · {new Date(record.date).toLocaleString()}</span>
+                        <span>
+                          {record.invoiceId}
+                          {record.exchangeInvoiceId ? ` → ${record.exchangeInvoiceId}` : ""}
+                          {" · "}
+                          {record.customer.name}
+                          {" · "}
+                          {new Date(record.date).toLocaleString()}
+                        </span>
                       </div>
                       <b>{record.difference > 0 ? `Collect ${money(record.difference)}` : `Refund ${money(Math.abs(record.difference))}`}</b>
                       <button type="button" onClick={() => printReturnSlip(record)}>Print slip</button>
@@ -2355,6 +2371,9 @@ function ReturnSlip({ record }) {
         <h2 className="return-slip-title">{isExchange ? "EXCHANGE SLIP" : "RETURN SLIP"}</h2>
         <div className="receipt-line"><span>Return ID</span><strong>{record.id}</strong></div>
         <div className="receipt-line"><span>Original bill</span><strong>{record.invoiceId}</strong></div>
+        {isExchange && record.exchangeInvoiceId && (
+          <div className="receipt-line"><span>Exchange bill</span><strong>{record.exchangeInvoiceId}</strong></div>
+        )}
         <div className="receipt-line"><span>Date</span><strong>{new Date(record.date).toLocaleString()}</strong></div>
         <div className="receipt-line"><span>Customer</span><strong>{record.customer?.name || "Walk-in customer"}</strong></div>
         <div className="receipt-invoice-barcode">
