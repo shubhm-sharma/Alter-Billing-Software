@@ -67,8 +67,9 @@ a {
 }
 
 .brand-lockup img {
-  width: 168px;
+  width: 150px;
   max-width: 100%;
+  border-radius: 12px;
   filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.32));
 }
 
