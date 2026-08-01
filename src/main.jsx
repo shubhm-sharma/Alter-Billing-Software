@@ -1206,7 +1206,7 @@ function App() {
   }
 
   if (!state) {
-    return <main className="loading-screen">Loading Alter Billing...</main>;
+    return <main className="loading-screen">Loading TAARA Billing...</main>;
   }
 
   const viewTitle = {
@@ -1223,7 +1223,7 @@ function App() {
       <main className="app-shell">
         <aside className="sidebar">
           <div className="brand-lockup">
-            <img src="/alter-logo-white.png" alt="Alter" />
+            <img src="/taara-logo-white.svg" alt="TAARA" />
             <span>Billing Desk</span>
           </div>
           <nav className="nav-tabs" aria-label="Main sections">
@@ -1250,7 +1250,7 @@ function App() {
         <section className="workspace">
           <header className="topbar">
             <div>
-              <p>Alter bags and accessories</p>
+              <p>TAARA billing software</p>
               <h1>{viewTitle}</h1>
             </div>
             <div className="status-pill">{notice || `${state.products.length} products ready`}</div>

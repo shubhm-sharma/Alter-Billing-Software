@@ -1,0 +1,11 @@
+<svg width="520" height="180" viewBox="0 0 520 180" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">TAARA</title>
+  <desc id="desc">TAARA billing software logo for dark backgrounds</desc>
+  <g transform="translate(42 28)">
+    <path d="M60 10H174C181.732 10 188 16.268 188 24V38C188 45.732 181.732 52 174 52H135V124C135 131.732 128.732 138 121 138H103C95.268 138 89 131.732 89 124V52H60C52.268 52 46 45.732 46 38V24C46 16.268 52.268 10 60 10Z" fill="#FFFFFF"/>
+    <path d="M33.439 81.88L40.953 98.166L57.24 105.681L40.953 113.195L33.439 129.481L25.924 113.195L9.638 105.681L25.924 98.166L33.439 81.88Z" fill="#C79A32"/>
+    <circle cx="186" cy="14" r="13" fill="#D76755"/>
+    <text x="210" y="107" fill="#FFFFFF" font-family="Inter, Avenir Next, Arial, sans-serif" font-size="72" font-weight="850" letter-spacing="3">TAARA</text>
+    <path d="M294 30L300.06 43.137L313.197 49.197L300.06 55.257L294 68.394L287.94 55.257L274.803 49.197L287.94 43.137L294 30Z" fill="#D76755"/>
+  </g>
+</svg>
