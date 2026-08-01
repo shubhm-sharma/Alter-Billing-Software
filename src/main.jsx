@@ -1223,7 +1223,7 @@ function App() {
       <main className="app-shell">
         <aside className="sidebar">
           <div className="brand-lockup">
-            <img src="/taara-logo.png" alt="TAARA" />
+            <img src="/taara-logo-dark-bg.png" alt="TAARA" />
             <span>Billing Desk</span>
           </div>
           <nav className="nav-tabs" aria-label="Main sections">
