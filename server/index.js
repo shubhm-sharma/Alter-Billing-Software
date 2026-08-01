@@ -553,6 +553,86 @@ async function sendWhatsAppText({ to, text }) {
   return payload;
 }
 
+function parseCampaignImage(imageData) {
+  const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=\s]+)$/.exec(imageData || "");
+  if (!match) return null;
+  const buffer = Buffer.from(match[2], "base64");
+  if (!buffer.length || buffer.length > 5 * 1024 * 1024) {
+    const error = new Error("Campaign image must be smaller than 5 MB.");
+    error.status = 400;
+    throw error;
+  }
+  return {
+    buffer,
+    mimeType: `image/${match[1]}`,
+    filename: `alter-campaign.${match[1] === "jpeg" ? "jpg" : match[1]}`,
+  };
+}
+
+async function uploadWhatsAppImage(imageData) {
+  if (!whatsappConfigured()) {
+    const error = new Error("WhatsApp is not configured. Add WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID.");
+    error.status = 400;
+    throw error;
+  }
+  const image = parseCampaignImage(imageData);
+  if (!image) return "";
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("type", image.mimeType);
+  form.append("file", new Blob([image.buffer], { type: image.mimeType }), image.filename);
+  const response = await fetch(`https://graph.facebook.com/${whatsappApiVersion}/${whatsappPhoneNumberId}/media`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${whatsappAccessToken}` },
+    body: form,
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload?.error?.message || "WhatsApp image upload failed.");
+    error.status = response.status;
+    throw error;
+  }
+  return payload.id || "";
+}
+
+async function sendWhatsAppImage({ to, mediaId, caption }) {
+  if (!whatsappConfigured()) {
+    const error = new Error("WhatsApp is not configured. Add WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID.");
+    error.status = 400;
+    throw error;
+  }
+  const normalizedPhone = normalizeWhatsAppPhone(to);
+  if (!normalizedPhone) {
+    const error = new Error("A valid WhatsApp phone number is required.");
+    error.status = 400;
+    throw error;
+  }
+  const response = await fetch(`https://graph.facebook.com/${whatsappApiVersion}/${whatsappPhoneNumberId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${whatsappAccessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: normalizedPhone,
+      type: "image",
+      image: {
+        id: mediaId,
+        caption,
+      },
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload?.error?.message || "WhatsApp image message failed.");
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+
 app.get("/api/state", async (req, res, next) => {
   try {
     res.json(await readDb());
@@ -980,6 +1060,46 @@ app.get("/api/whatsapp/status", (req, res) => {
   res.json({ configured: whatsappConfigured() });
 });
 
+app.post("/api/customers/whatsapp-opt-in", async (req, res, next) => {
+  try {
+    const db = await readDb();
+    const optInAt = new Date().toISOString();
+    let updated = 0;
+    for (const invoice of db.invoices) {
+      if (!invoice.customer?.phone) continue;
+      if (!invoice.customer.whatsappOptIn) updated += 1;
+      invoice.customer.whatsappOptIn = true;
+      invoice.customer.whatsappOptInAt = invoice.customer.whatsappOptInAt || optInAt;
+      invoice.editedAt = optInAt;
+    }
+    for (const customer of db.customers) {
+      if (!customer.phone) continue;
+      if (!customer.whatsappOptIn) updated += 1;
+      customer.whatsappOptIn = true;
+      customer.whatsappOptInAt = customer.whatsappOptInAt || optInAt;
+    }
+    rebuildCustomers(db);
+    for (const customer of db.customers) {
+      if (customer.phone) {
+        customer.whatsappOptIn = true;
+        customer.whatsappOptInAt = customer.whatsappOptInAt || optInAt;
+      }
+    }
+    if (mongoUri) {
+      const mongoDb = await getMongoDb();
+      await Promise.all([
+        replaceMongoCollection(mongoDb, "invoices", db.invoices),
+        replaceMongoCollection(mongoDb, "customers", db.customers),
+      ]);
+    } else {
+      await writeDb(db);
+    }
+    res.json({ ok: true, updated, customers: db.customers });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/whatsapp/send-invoice", async (req, res, next) => {
   try {
     const db = await readDb();
@@ -1007,8 +1127,9 @@ app.post("/api/whatsapp/send-campaign", async (req, res, next) => {
   try {
     const db = await readDb();
     const message = String(req.body.message || "").trim();
-    if (!message) {
-      res.status(400).json({ error: "Campaign message is required." });
+    const imageData = String(req.body.imageData || "");
+    if (!message && !imageData) {
+      res.status(400).json({ error: "Campaign message or image is required." });
       return;
     }
     const recipients = db.customers.filter((customer) => customer.whatsappOptIn && normalizeWhatsAppPhone(customer.phone));
@@ -1016,13 +1137,16 @@ app.post("/api/whatsapp/send-campaign", async (req, res, next) => {
       res.status(400).json({ error: "No WhatsApp opted-in customers with phone numbers found." });
       return;
     }
+    const mediaId = imageData ? await uploadWhatsAppImage(imageData) : "";
     const results = [];
     for (const customer of recipients) {
       try {
         const personalizedMessage = message
           .replaceAll("{name}", customer.name || "Customer")
           .replaceAll("{shop}", db.settings.shopName || "Alter");
-        const result = await sendWhatsAppText({ to: customer.phone, text: personalizedMessage });
+        const result = mediaId
+          ? await sendWhatsAppImage({ to: customer.phone, mediaId, caption: personalizedMessage })
+          : await sendWhatsAppText({ to: customer.phone, text: personalizedMessage });
         results.push({ key: customer.key, name: customer.name, phone: customer.phone, ok: true, messageId: result?.messages?.[0]?.id || "" });
       } catch (error) {
         results.push({ key: customer.key, name: customer.name, phone: customer.phone, ok: false, error: error.message });

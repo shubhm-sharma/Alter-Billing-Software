@@ -198,6 +198,47 @@ a {
   background: rgba(36, 86, 75, 0.07);
 }
 
+.bulk-whatsapp-box,
+.campaign-image-field {
+  display: grid;
+  gap: 10px;
+}
+
+.bulk-whatsapp-box .secondary-button {
+  justify-self: start;
+}
+
+.campaign-image-preview {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfc;
+}
+
+.campaign-image-preview img {
+  width: 76px;
+  height: 76px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #ffffff;
+}
+
+.campaign-image-preview div {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.campaign-image-preview strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .billing-grid,
 .catalog-grid {
   display: grid;

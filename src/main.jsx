@@ -188,8 +188,11 @@ function App() {
   const [isBilling, setIsBilling] = useState(false);
   const [whatsappStatus, setWhatsappStatus] = useState({ configured: false });
   const [whatsappCampaignMessage, setWhatsappCampaignMessage] = useState("");
+  const [whatsappCampaignImage, setWhatsappCampaignImage] = useState({ name: "", data: "" });
   const [whatsappCampaignResult, setWhatsappCampaignResult] = useState(null);
   const [isSendingCampaign, setIsSendingCampaign] = useState(false);
+  const [bulkWhatsAppOptInChecked, setBulkWhatsAppOptInChecked] = useState(false);
+  const [isBulkOptingIn, setIsBulkOptingIn] = useState(false);
   const [sendingWhatsAppInvoiceId, setSendingWhatsAppInvoiceId] = useState("");
   const [notice, setNotice] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -586,10 +589,53 @@ function App() {
     }
   }
 
+  function selectWhatsAppCampaignImage(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      showNotice("Choose a PNG, JPEG, or WebP campaign image");
+      event.target.value = "";
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      showNotice("Campaign image must be smaller than 5 MB");
+      event.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setWhatsappCampaignImage({ name: file.name, data: String(reader.result) });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function bulkOptInWhatsAppCustomers() {
+    if (!bulkWhatsAppOptInChecked) {
+      showNotice("Tick the bulk opt-in checkbox first");
+      return;
+    }
+    const confirmed = window.confirm("Onboard all customers with phone numbers to WhatsApp promotions?");
+    if (!confirmed) return;
+    setIsBulkOptingIn(true);
+    try {
+      const result = await api("/api/customers/whatsapp-opt-in", {
+        method: "POST",
+        body: "{}",
+      });
+      await loadState();
+      setBulkWhatsAppOptInChecked(false);
+      showNotice(`${result.customers?.filter((item) => item.whatsappOptIn && item.phone).length || 0} customers onboarded to WhatsApp`);
+    } catch (error) {
+      showNotice(error.message);
+    } finally {
+      setIsBulkOptingIn(false);
+    }
+  }
+
   async function sendWhatsAppCampaign(event) {
     event.preventDefault();
-    if (!whatsappCampaignMessage.trim()) {
-      showNotice("Enter a WhatsApp campaign message");
+    if (!whatsappCampaignMessage.trim() && !whatsappCampaignImage.data) {
+      showNotice("Enter a WhatsApp campaign message or attach an image");
       return;
     }
     const confirmed = window.confirm(`Send this WhatsApp message to ${whatsappOptedInCustomers.length} opted-in customers?`);
@@ -599,7 +645,7 @@ function App() {
     try {
       const result = await api("/api/whatsapp/send-campaign", {
         method: "POST",
-        body: JSON.stringify({ message: whatsappCampaignMessage }),
+        body: JSON.stringify({ message: whatsappCampaignMessage, imageData: whatsappCampaignImage.data }),
       });
       setWhatsappCampaignResult(result);
       showNotice(`WhatsApp campaign sent: ${result.sent} sent, ${result.failed} failed`);
@@ -1630,6 +1676,24 @@ function App() {
                     {whatsappStatus.configured ? "Configured" : "Needs setup"}
                   </span>
                 </div>
+                <div className="bulk-whatsapp-box">
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={bulkWhatsAppOptInChecked}
+                      onChange={(event) => setBulkWhatsAppOptInChecked(event.target.checked)}
+                    />
+                    Onboard all current customers with phone numbers to WhatsApp promotions
+                  </label>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={!bulkWhatsAppOptInChecked || isBulkOptingIn}
+                    onClick={bulkOptInWhatsAppCustomers}
+                  >
+                    {isBulkOptingIn ? "Onboarding..." : "Onboard all customers"}
+                  </button>
+                </div>
                 <label>
                   Campaign message
                   <textarea
@@ -1639,6 +1703,23 @@ function App() {
                     placeholder="Hi {name}, new arrivals are now available at {shop}. Visit us today."
                   />
                 </label>
+                <div className="campaign-image-field">
+                  <label>
+                    Promotional image
+                    <input type="file" accept="image/png,image/jpeg,image/webp" onChange={selectWhatsAppCampaignImage} />
+                  </label>
+                  {whatsappCampaignImage.data && (
+                    <div className="campaign-image-preview">
+                      <img src={whatsappCampaignImage.data} alt="Campaign attachment preview" />
+                      <div>
+                        <strong>{whatsappCampaignImage.name}</strong>
+                        <button className="quiet-button" type="button" onClick={() => setWhatsappCampaignImage({ name: "", data: "" })}>
+                          Remove image
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
                 <p className="panel-note">Messages are sent only to customers who allowed WhatsApp updates. Use approved Meta templates for marketing campaigns outside WhatsApp's customer-service window.</p>
                 <button className="primary-button" type="submit" disabled={isSendingCampaign || !whatsappOptedInCustomers.length}>
                   {isSendingCampaign ? "Sending..." : "Send WhatsApp campaign"}
