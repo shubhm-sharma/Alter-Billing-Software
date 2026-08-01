@@ -159,6 +159,45 @@ a {
   font-weight: 850;
 }
 
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: max-content;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.status-badge.success {
+  border-color: rgba(36, 86, 75, 0.2);
+  color: var(--forest);
+  background: rgba(36, 86, 75, 0.08);
+}
+
+.status-badge.warning {
+  border-color: rgba(199, 154, 50, 0.32);
+  color: #8a640d;
+  background: rgba(199, 154, 50, 0.12);
+}
+
+.status-badge.muted {
+  color: var(--muted);
+  background: #f3f5f7;
+}
+
+.campaign-result {
+  padding: 10px 12px;
+  border: 1px solid rgba(36, 86, 75, 0.18);
+  border-radius: 8px;
+  color: var(--forest);
+  background: rgba(36, 86, 75, 0.07);
+}
+
 .billing-grid,
 .catalog-grid {
   display: grid;

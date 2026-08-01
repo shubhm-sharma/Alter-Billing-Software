@@ -19,6 +19,9 @@ const productImagesDir = path.join(dataDir, "product-images");
 const port = Number(process.env.PORT || 4173);
 const mongoUri = process.env.MONGODB_URI;
 const mongoDatabaseName = process.env.MONGODB_DB || "alter-billing";
+const whatsappAccessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+const whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+const whatsappApiVersion = process.env.WHATSAPP_API_VERSION || "v21.0";
 let mongoClientPromise;
 
 const defaultDb = {
@@ -197,6 +200,8 @@ function buildInvoice(db, body, { id, date } = {}) {
       address: String(body.customer.address || "").trim(),
       gstin: String(body.customer.gstin || "").trim(),
       stateCode: String(body.customer.stateCode || "").trim(),
+      whatsappOptIn: Boolean(body.customer.whatsappOptIn),
+      whatsappOptInAt: body.customer.whatsappOptIn ? String(body.customer.whatsappOptInAt || new Date().toISOString()) : "",
     },
     items: items.map((item) => ({
       productId: item.productId || "",
@@ -344,6 +349,8 @@ function upsertCustomer(db, invoice) {
     existing.address = invoice.customer.address;
     existing.gstin = invoice.customer.gstin;
     existing.stateCode = invoice.customer.stateCode;
+    existing.whatsappOptIn = Boolean(existing.whatsappOptIn || invoice.customer.whatsappOptIn);
+    existing.whatsappOptInAt = invoice.customer.whatsappOptInAt || existing.whatsappOptInAt || "";
     existing.invoiceCount += 1;
     existing.totalSpent += invoice.totals.total;
     existing.lastPurchase = invoice.date;
@@ -356,6 +363,8 @@ function upsertCustomer(db, invoice) {
     address: invoice.customer.address,
     gstin: invoice.customer.gstin,
     stateCode: invoice.customer.stateCode,
+    whatsappOptIn: Boolean(invoice.customer.whatsappOptIn),
+    whatsappOptInAt: invoice.customer.whatsappOptInAt || "",
     invoiceCount: 1,
     totalSpent: invoice.totals.total,
     lastPurchase: invoice.date,
@@ -375,6 +384,8 @@ function summarizeCustomers(invoices) {
       existing.address = invoice.customer.address;
       existing.gstin = invoice.customer.gstin;
       existing.stateCode = invoice.customer.stateCode;
+      existing.whatsappOptIn = Boolean(existing.whatsappOptIn || invoice.customer.whatsappOptIn);
+      existing.whatsappOptInAt = invoice.customer.whatsappOptInAt || existing.whatsappOptInAt || "";
       existing.invoiceCount += 1;
       existing.totalSpent += Number(invoice.totals.total || 0);
       if (invoice.date > existing.lastPurchase) existing.lastPurchase = invoice.date;
@@ -386,6 +397,8 @@ function summarizeCustomers(invoices) {
         address: invoice.customer.address,
         gstin: invoice.customer.gstin,
         stateCode: invoice.customer.stateCode,
+        whatsappOptIn: Boolean(invoice.customer.whatsappOptIn),
+        whatsappOptInAt: invoice.customer.whatsappOptInAt || "",
         invoiceCount: 1,
         totalSpent: Number(invoice.totals.total || 0),
         lastPurchase: invoice.date,
@@ -403,6 +416,7 @@ async function upsertCustomerInMongo(invoice) {
   const db = await getMongoDb();
   const phone = invoice.customer.phone.trim();
   const key = phone || invoice.customer.name.trim().toLowerCase();
+  const existing = await db.collection("customers").findOne({ key }, { projection: { whatsappOptIn: 1, whatsappOptInAt: 1 } });
   await db.collection("customers").updateOne(
     { key },
     {
@@ -412,6 +426,8 @@ async function upsertCustomerInMongo(invoice) {
         address: invoice.customer.address,
         gstin: invoice.customer.gstin,
         stateCode: invoice.customer.stateCode,
+        whatsappOptIn: Boolean(existing?.whatsappOptIn || invoice.customer.whatsappOptIn),
+        whatsappOptInAt: invoice.customer.whatsappOptInAt || existing?.whatsappOptInAt || "",
         lastPurchase: invoice.date,
       },
       $setOnInsert: { key },
@@ -467,6 +483,76 @@ async function adjustMongoStock(changes) {
   await db.collection("products").bulkWrite(updates);
 }
 
+function normalizeWhatsAppPhone(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 10) return `91${digits}`;
+  return digits;
+}
+
+function whatsappConfigured() {
+  return Boolean(whatsappAccessToken && whatsappPhoneNumberId);
+}
+
+function formatCurrency(value) {
+  return Number(value || 0).toLocaleString("en-IN", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: Number(value || 0) % 1 ? 2 : 0,
+  });
+}
+
+function invoiceWhatsAppText(invoice) {
+  const shop = invoice.shop || {};
+  const lines = [
+    `Thank you for shopping with ${shop.shopName || "Alter"}.`,
+    `Bill: ${invoice.id}`,
+    `Date: ${new Date(invoice.date).toLocaleString("en-IN")}`,
+    `Total: ₹${formatCurrency(invoice.totals?.total)}`,
+    `Payment: ${invoice.paymentMode || "Cash"}`,
+  ];
+  if (shop.shopPhone) lines.push(`Store: ${shop.shopPhone}`);
+  lines.push("Please keep this message for your records.");
+  return lines.join("\n");
+}
+
+async function sendWhatsAppText({ to, text }) {
+  if (!whatsappConfigured()) {
+    const error = new Error("WhatsApp is not configured. Add WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID.");
+    error.status = 400;
+    throw error;
+  }
+  const normalizedPhone = normalizeWhatsAppPhone(to);
+  if (!normalizedPhone) {
+    const error = new Error("A valid WhatsApp phone number is required.");
+    error.status = 400;
+    throw error;
+  }
+  const response = await fetch(`https://graph.facebook.com/${whatsappApiVersion}/${whatsappPhoneNumberId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${whatsappAccessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: normalizedPhone,
+      type: "text",
+      text: {
+        preview_url: false,
+        body: text,
+      },
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload?.error?.message || "WhatsApp message failed.");
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+
 app.get("/api/state", async (req, res, next) => {
   try {
     res.json(await readDb());
@@ -484,6 +570,8 @@ app.get("/api/customers/export.csv", async (req, res, next) => {
       { label: "Address", value: (customer) => customer.address },
       { label: "GSTIN", value: (customer) => customer.gstin },
       { label: "State Code", value: (customer) => customer.stateCode },
+      { label: "WhatsApp Opt In", value: (customer) => customer.whatsappOptIn ? "Yes" : "No" },
+      { label: "WhatsApp Opt In Date", value: (customer) => customer.whatsappOptInAt || "" },
       { label: "Invoice Count", value: (customer) => customer.invoiceCount },
       { label: "Total Spent", value: (customer) => Number(customer.totalSpent || 0).toFixed(2) },
       { label: "Last Purchase", value: (customer) => customer.lastPurchase },
@@ -506,6 +594,8 @@ app.put("/api/customers/:key", async (req, res, next) => {
       address: String(req.body.address || "").trim(),
       gstin: String(req.body.gstin || "").trim().toUpperCase(),
       stateCode: String(req.body.stateCode || "").trim(),
+      whatsappOptIn: Boolean(req.body.whatsappOptIn),
+      whatsappOptInAt: req.body.whatsappOptIn ? String(req.body.whatsappOptInAt || new Date().toISOString()) : "",
     };
     if (!updatedCustomer.name) {
       res.status(400).json({ error: "Customer name is required." });
@@ -886,6 +976,69 @@ app.post("/api/clear-records", async (req, res, next) => {
   }
 });
 
+app.get("/api/whatsapp/status", (req, res) => {
+  res.json({ configured: whatsappConfigured() });
+});
+
+app.post("/api/whatsapp/send-invoice", async (req, res, next) => {
+  try {
+    const db = await readDb();
+    const invoice = db.invoices.find((item) => item.id === req.body.invoiceId);
+    if (!invoice) {
+      res.status(404).json({ error: "Invoice was not found." });
+      return;
+    }
+    const phone = req.body.phone || invoice.customer?.phone;
+    if (!phone) {
+      res.status(400).json({ error: "Customer phone number is required." });
+      return;
+    }
+    const result = await sendWhatsAppText({
+      to: phone,
+      text: invoiceWhatsAppText(invoice),
+    });
+    res.json({ ok: true, messageId: result?.messages?.[0]?.id || "" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/whatsapp/send-campaign", async (req, res, next) => {
+  try {
+    const db = await readDb();
+    const message = String(req.body.message || "").trim();
+    if (!message) {
+      res.status(400).json({ error: "Campaign message is required." });
+      return;
+    }
+    const recipients = db.customers.filter((customer) => customer.whatsappOptIn && normalizeWhatsAppPhone(customer.phone));
+    if (!recipients.length) {
+      res.status(400).json({ error: "No WhatsApp opted-in customers with phone numbers found." });
+      return;
+    }
+    const results = [];
+    for (const customer of recipients) {
+      try {
+        const personalizedMessage = message
+          .replaceAll("{name}", customer.name || "Customer")
+          .replaceAll("{shop}", db.settings.shopName || "Alter");
+        const result = await sendWhatsAppText({ to: customer.phone, text: personalizedMessage });
+        results.push({ key: customer.key, name: customer.name, phone: customer.phone, ok: true, messageId: result?.messages?.[0]?.id || "" });
+      } catch (error) {
+        results.push({ key: customer.key, name: customer.name, phone: customer.phone, ok: false, error: error.message });
+      }
+    }
+    res.json({
+      ok: results.some((result) => result.ok),
+      sent: results.filter((result) => result.ok).length,
+      failed: results.filter((result) => !result.ok).length,
+      results,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/backup", async (req, res, next) => {
   try {
     const db = await readDb();
@@ -910,7 +1063,7 @@ app.use(async (req, res) => {
 
 app.use((error, req, res, next) => {
   console.error(error);
-  res.status(500).json({ error: error.message || "Something went wrong." });
+  res.status(error.status || 500).json({ error: error.message || "Something went wrong." });
 });
 
 app.listen(port, () => {

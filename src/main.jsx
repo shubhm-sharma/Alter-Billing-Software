@@ -4,7 +4,7 @@ import JsBarcode from "jsbarcode";
 import QRCode from "qrcode";
 import "./styles.css";
 
-const emptyCustomer = { name: "", phone: "", address: "", gstin: "", stateCode: "" };
+const emptyCustomer = { name: "", phone: "", address: "", gstin: "", stateCode: "", whatsappOptIn: false, whatsappOptInAt: "" };
 const emptyProduct = {
   id: "",
   name: "",
@@ -186,6 +186,11 @@ function App() {
   const [salesReportStart, setSalesReportStart] = useState(monthStartKey());
   const [salesReportEnd, setSalesReportEnd] = useState(dateKey());
   const [isBilling, setIsBilling] = useState(false);
+  const [whatsappStatus, setWhatsappStatus] = useState({ configured: false });
+  const [whatsappCampaignMessage, setWhatsappCampaignMessage] = useState("");
+  const [whatsappCampaignResult, setWhatsappCampaignResult] = useState(null);
+  const [isSendingCampaign, setIsSendingCampaign] = useState(false);
+  const [sendingWhatsAppInvoiceId, setSendingWhatsAppInvoiceId] = useState("");
   const [notice, setNotice] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
@@ -196,6 +201,7 @@ function App() {
 
   useEffect(() => {
     loadState();
+    loadWhatsAppStatus();
   }, []);
 
   useEffect(() => {
@@ -238,6 +244,15 @@ function App() {
   async function loadState() {
     const data = await api("/api/state");
     setState(data);
+  }
+
+  async function loadWhatsAppStatus() {
+    try {
+      const data = await api("/api/whatsapp/status");
+      setWhatsappStatus(data);
+    } catch {
+      setWhatsappStatus({ configured: false });
+    }
   }
 
   function showNotice(message) {
@@ -336,6 +351,11 @@ function App() {
       .filter((item) => item.phone?.replace(/\D/g, "").includes(digits))
       .slice(0, 5);
   }, [state, customer.phone]);
+
+  const whatsappOptedInCustomers = useMemo(
+    () => (state?.customers || []).filter((item) => item.whatsappOptIn && item.phone),
+    [state]
+  );
 
   const filteredInvoices = useMemo(() => {
     if (!state) return [];
@@ -492,6 +512,8 @@ function App() {
       address: savedCustomer.address || "",
       gstin: savedCustomer.gstin || "",
       stateCode: savedCustomer.stateCode || "",
+      whatsappOptIn: Boolean(savedCustomer.whatsappOptIn),
+      whatsappOptInAt: savedCustomer.whatsappOptInAt || "",
     });
     setCustomerLookup("");
     showNotice(`${savedCustomer.name} linked`);
@@ -499,13 +521,15 @@ function App() {
 
   function exportCustomersCsv() {
     const rows = [
-      ["Name", "Phone", "Address", "GSTIN", "State Code", "Invoice Count", "Total Spent", "Last Purchase"],
+      ["Name", "Phone", "Address", "GSTIN", "State Code", "WhatsApp Opt In", "WhatsApp Opt In Date", "Invoice Count", "Total Spent", "Last Purchase"],
       ...state.customers.map((item) => [
         item.name,
         item.phone,
         item.address,
         item.gstin || "",
         item.stateCode || "",
+        item.whatsappOptIn ? "Yes" : "No",
+        item.whatsappOptInAt || "",
         item.invoiceCount,
         Number(item.totalSpent || 0).toFixed(2),
         item.lastPurchase || "",
@@ -522,6 +546,8 @@ function App() {
       address: item.address || "",
       gstin: item.gstin || "",
       stateCode: item.stateCode || "",
+      whatsappOptIn: Boolean(item.whatsappOptIn),
+      whatsappOptInAt: item.whatsappOptInAt || "",
     });
   }
 
@@ -538,6 +564,49 @@ function App() {
       showNotice(`${saved.name} updated`);
     } catch (error) {
       showNotice(error.message);
+    }
+  }
+
+  async function sendInvoiceWhatsApp(invoice) {
+    if (!invoice.customer?.phone) {
+      showNotice("Customer phone number is required for WhatsApp");
+      return;
+    }
+    setSendingWhatsAppInvoiceId(invoice.id);
+    try {
+      await api("/api/whatsapp/send-invoice", {
+        method: "POST",
+        body: JSON.stringify({ invoiceId: invoice.id }),
+      });
+      showNotice(`Bill ${invoice.id} sent on WhatsApp`);
+    } catch (error) {
+      showNotice(error.message);
+    } finally {
+      setSendingWhatsAppInvoiceId("");
+    }
+  }
+
+  async function sendWhatsAppCampaign(event) {
+    event.preventDefault();
+    if (!whatsappCampaignMessage.trim()) {
+      showNotice("Enter a WhatsApp campaign message");
+      return;
+    }
+    const confirmed = window.confirm(`Send this WhatsApp message to ${whatsappOptedInCustomers.length} opted-in customers?`);
+    if (!confirmed) return;
+    setIsSendingCampaign(true);
+    setWhatsappCampaignResult(null);
+    try {
+      const result = await api("/api/whatsapp/send-campaign", {
+        method: "POST",
+        body: JSON.stringify({ message: whatsappCampaignMessage }),
+      });
+      setWhatsappCampaignResult(result);
+      showNotice(`WhatsApp campaign sent: ${result.sent} sent, ${result.failed} failed`);
+    } catch (error) {
+      showNotice(error.message);
+    } finally {
+      setIsSendingCampaign(false);
     }
   }
 
@@ -1246,6 +1315,20 @@ function App() {
                     Phone
                     <input value={customer.phone} onChange={(event) => setCustomer({ ...customer, phone: event.target.value })} />
                   </label>
+                  <label className="checkbox-row wide-field">
+                    <input
+                      type="checkbox"
+                      checked={customer.whatsappOptIn}
+                      onChange={(event) =>
+                        setCustomer({
+                          ...customer,
+                          whatsappOptIn: event.target.checked,
+                          whatsappOptInAt: event.target.checked ? customer.whatsappOptInAt || new Date().toISOString() : "",
+                        })
+                      }
+                    />
+                    Allow WhatsApp bills and promotional messages
+                  </label>
                   {phoneCustomerMatches.length > 0 && (
                     <div className="customer-match-list phone-match-list">
                       {phoneCustomerMatches.map((item) => (
@@ -1537,6 +1620,35 @@ function App() {
                 </div>
                 <p className="panel-note">Use this CSV in Excel or your messaging tool for promotional campaigns.</p>
               </section>
+              <form className="panel whatsapp-panel" onSubmit={sendWhatsAppCampaign}>
+                <div className="panel-title">
+                  <div>
+                    <h2>WhatsApp promotions</h2>
+                    <span>{whatsappOptedInCustomers.length} opted-in customers</span>
+                  </div>
+                  <span className={whatsappStatus.configured ? "status-badge success" : "status-badge warning"}>
+                    {whatsappStatus.configured ? "Configured" : "Needs setup"}
+                  </span>
+                </div>
+                <label>
+                  Campaign message
+                  <textarea
+                    rows="4"
+                    value={whatsappCampaignMessage}
+                    onChange={(event) => setWhatsappCampaignMessage(event.target.value)}
+                    placeholder="Hi {name}, new arrivals are now available at {shop}. Visit us today."
+                  />
+                </label>
+                <p className="panel-note">Messages are sent only to customers who allowed WhatsApp updates. Use approved Meta templates for marketing campaigns outside WhatsApp's customer-service window.</p>
+                <button className="primary-button" type="submit" disabled={isSendingCampaign || !whatsappOptedInCustomers.length}>
+                  {isSendingCampaign ? "Sending..." : "Send WhatsApp campaign"}
+                </button>
+                {whatsappCampaignResult && (
+                  <div className="campaign-result">
+                    <strong>{whatsappCampaignResult.sent} sent · {whatsappCampaignResult.failed} failed</strong>
+                  </div>
+                )}
+              </form>
               {customerForm && (
                 <form className="panel" onSubmit={saveCustomer}>
                   <div className="panel-title">
@@ -1551,6 +1663,20 @@ function App() {
                     <label>
                       Phone
                       <input value={customerForm.phone} onChange={(event) => setCustomerForm({ ...customerForm, phone: event.target.value })} />
+                    </label>
+                    <label className="checkbox-row wide-field">
+                      <input
+                        type="checkbox"
+                        checked={customerForm.whatsappOptIn}
+                        onChange={(event) =>
+                          setCustomerForm({
+                            ...customerForm,
+                            whatsappOptIn: event.target.checked,
+                            whatsappOptInAt: event.target.checked ? customerForm.whatsappOptInAt || new Date().toISOString() : "",
+                          })
+                        }
+                      />
+                      Allow WhatsApp bills and promotional messages
                     </label>
                     <label className="wide-field">
                       Address
@@ -1576,6 +1702,9 @@ function App() {
                       <span>{item.phone || "No phone"} · {item.invoiceCount} bills · {money(item.totalSpent)}</span>
                     </div>
                     <span>{item.address}</span>
+                    <span className={item.whatsappOptIn ? "status-badge success" : "status-badge muted"}>
+                      {item.whatsappOptIn ? "WhatsApp yes" : "WhatsApp no"}
+                    </span>
                     <button type="button" onClick={() => startEditCustomer(item)}>Edit</button>
                   </article>
                 )) : <div className="empty-state">No customers saved yet.</div>}
@@ -1657,6 +1786,13 @@ function App() {
                         }}
                       >
                         Print
+                      </button>
+                      <button
+                        type="button"
+                        disabled={sendingWhatsAppInvoiceId === invoice.id}
+                        onClick={() => sendInvoiceWhatsApp(invoice)}
+                      >
+                        {sendingWhatsAppInvoiceId === invoice.id ? "Sending..." : "WhatsApp"}
                       </button>
                       <button className="quiet-danger" type="button" onClick={() => deleteInvoice(invoice)}>Delete</button>
                     </div>
