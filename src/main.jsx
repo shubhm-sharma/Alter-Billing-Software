@@ -1802,7 +1802,21 @@ function App() {
                 </button>
                 {whatsappCampaignResult && (
                   <div className="campaign-result">
-                    <strong>{whatsappCampaignResult.sent} sent · {whatsappCampaignResult.failed} failed</strong>
+                    <strong>{whatsappCampaignResult.sent} accepted · {whatsappCampaignResult.failed} failed · {whatsappCampaignResult.attempted || 0} attempted</strong>
+                    <div className="campaign-result-list">
+                      {(whatsappCampaignResult.results || []).map((result) => (
+                        <div className="campaign-result-row" key={`${result.key}-${result.normalizedPhone || result.phone}`}>
+                          <span>
+                            <strong>{result.name || "Customer"}</strong>
+                            <small>{result.phone || "No phone"} → {result.normalizedPhone || "Invalid"}</small>
+                          </span>
+                          <span className={result.ok ? "status-badge success" : "status-badge warning"}>
+                            {result.ok ? "Accepted" : "Failed"}
+                          </span>
+                          <small>{result.ok ? result.messageId || "Queued by Meta" : [result.error, result.errorCode && `Code ${result.errorCode}`].filter(Boolean).join(" · ")}</small>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </form>
@@ -1986,13 +2000,13 @@ function App() {
                         {message.customerName || message.from || message.to || "WhatsApp"}
                       </strong>
                       <span>
-                        {message.direction === "incoming" ? `From ${message.from}` : `Status for ${message.to}`}
+                        {message.direction === "incoming" ? `From ${message.from}` : message.direction === "outgoing" ? `To ${message.to}` : `Status for ${message.to}`}
                         {" · "}
                         {new Date(message.timestamp).toLocaleString()}
                       </span>
                     </div>
                     <span className="whatsapp-message-text">{message.text}</span>
-                    <span className={message.direction === "incoming" ? "status-badge success" : "status-badge muted"}>
+                    <span className={message.direction === "incoming" ? "status-badge success" : message.direction === "outgoing" ? "status-badge warning" : "status-badge muted"}>
                       {message.direction === "incoming" ? message.type : message.status || "status"}
                     </span>
                   </article>

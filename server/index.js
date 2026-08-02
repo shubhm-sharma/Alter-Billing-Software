@@ -791,6 +791,7 @@ async function sendWhatsAppTemplate({ to, templateName, languageCode = whatsappT
   if (!response.ok) {
     const error = new Error(payload?.error?.message || "WhatsApp template message failed.");
     error.status = response.status;
+    error.details = payload?.error || null;
     throw error;
   }
   return payload;
@@ -1393,6 +1394,7 @@ app.post("/api/whatsapp/send-campaign", async (req, res, next) => {
     const mediaId = imageData ? await uploadWhatsAppImage(imageData) : "";
     const results = [];
     for (const customer of recipients) {
+      const normalizedPhone = normalizeWhatsAppPhone(customer.phone);
       try {
         const result = await sendWhatsAppTemplate({
           to: customer.phone,
@@ -1400,13 +1402,62 @@ app.post("/api/whatsapp/send-campaign", async (req, res, next) => {
           bodyValues: [customer.name || "Customer"],
           imageMediaId: mediaId,
         });
-        results.push({ key: customer.key, name: customer.name, phone: customer.phone, ok: true, messageId: result?.messages?.[0]?.id || "", mode: "template" });
+        results.push({
+          key: customer.key,
+          name: customer.name,
+          phone: customer.phone,
+          normalizedPhone,
+          ok: true,
+          status: "accepted",
+          messageId: result?.messages?.[0]?.id || "",
+          mode: "template",
+        });
       } catch (error) {
-        results.push({ key: customer.key, name: customer.name, phone: customer.phone, ok: false, error: error.message });
+        results.push({
+          key: customer.key,
+          name: customer.name,
+          phone: customer.phone,
+          normalizedPhone,
+          ok: false,
+          status: "failed",
+          error: error.message,
+          errorCode: error.details?.code || "",
+          errorSubcode: error.details?.error_subcode || "",
+        });
+      }
+    }
+    const acceptedEvents = results
+      .filter((result) => result.ok)
+      .map((result) => ({
+        id: result.messageId || makeId("wao"),
+        direction: "outgoing",
+        from: whatsappPhoneNumberId,
+        to: result.normalizedPhone,
+        customerKey: result.key,
+        customerName: result.name,
+        type: "template",
+        text: `Campaign template: ${whatsappPromotionTemplate}`,
+        status: "accepted",
+        timestamp: new Date().toISOString(),
+        raw: {
+          template: whatsappPromotionTemplate,
+          messageId: result.messageId,
+        },
+      }));
+    if (acceptedEvents.length) {
+      db.whatsappMessages = [...acceptedEvents, ...(db.whatsappMessages || [])]
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+        .slice(0, 1000);
+      if (mongoUri) {
+        const mongoDb = await getMongoDb();
+        await mongoDb.collection("whatsappMessages").insertMany(acceptedEvents);
+      } else {
+        await writeDb(db);
       }
     }
     res.json({
       ok: results.some((result) => result.ok),
+      attempted: recipients.length,
       sent: results.filter((result) => result.ok).length,
       failed: results.filter((result) => !result.ok).length,
       mode: "template",

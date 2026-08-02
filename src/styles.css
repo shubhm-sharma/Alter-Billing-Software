@@ -191,11 +191,38 @@ a {
 }
 
 .campaign-result {
+  display: grid;
+  gap: 10px;
   padding: 10px 12px;
   border: 1px solid rgba(36, 86, 75, 0.18);
   border-radius: 8px;
   color: var(--forest);
   background: rgba(36, 86, 75, 0.07);
+}
+
+.campaign-result-list {
+  display: grid;
+  gap: 8px;
+}
+
+.campaign-result-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto minmax(220px, 1.2fr);
+  gap: 10px;
+  align-items: center;
+  padding: 9px;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.campaign-result-row > span:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.campaign-result-row small {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .bulk-whatsapp-box,
@@ -1403,6 +1430,10 @@ textarea:focus {
 
   .customer-card-actions {
     justify-items: stretch;
+  }
+
+  .campaign-result-row {
+    grid-template-columns: 1fr;
   }
 
   .product-data-card {
