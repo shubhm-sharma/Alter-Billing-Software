@@ -22,6 +22,10 @@ const mongoDatabaseName = process.env.MONGODB_DB || "alter-billing";
 const whatsappAccessToken = process.env.WHATSAPP_ACCESS_TOKEN;
 const whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
 const whatsappApiVersion = process.env.WHATSAPP_API_VERSION || "v21.0";
+const whatsappWebhookVerifyToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || "taara_whatsapp_verify_2026";
+const whatsappTemplateLanguage = process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en";
+const whatsappInvoiceTemplate = process.env.WHATSAPP_INVOICE_TEMPLATE || "invoice_sent";
+const whatsappPromotionTemplate = process.env.WHATSAPP_PROMOTION_TEMPLATE || "alter_new_arrivals";
 let mongoClientPromise;
 
 const defaultDb = {
@@ -43,6 +47,7 @@ const defaultDb = {
   customers: [],
   invoices: [],
   returns: [],
+  whatsappMessages: [],
 };
 
 const app = express();
@@ -87,6 +92,7 @@ function normalizeDb(db = {}) {
     customers: Array.isArray(db.customers) ? db.customers : [],
     invoices: Array.isArray(db.invoices) ? db.invoices : [],
     returns: Array.isArray(db.returns) ? db.returns : [],
+    whatsappMessages: Array.isArray(db.whatsappMessages) ? db.whatsappMessages : [],
   };
 }
 
@@ -100,15 +106,16 @@ async function getMongoDb() {
 
 async function readMongoDb() {
   const db = await getMongoDb();
-  const [settings, products, customers, invoices, returns] = await Promise.all([
+  const [settings, products, customers, invoices, returns, whatsappMessages] = await Promise.all([
     db.collection("settings").findOne({ id: "settings" }, { projection: { _id: 0 } }),
     db.collection("products").find({}, { projection: { _id: 0 } }).toArray(),
     db.collection("customers").find({}, { projection: { _id: 0 } }).toArray(),
     db.collection("invoices").find({}, { projection: { _id: 0 } }).toArray(),
     db.collection("returns").find({}, { projection: { _id: 0 } }).toArray(),
+    db.collection("whatsappMessages").find({}, { projection: { _id: 0 } }).toArray(),
   ]);
 
-  return normalizeDb({ settings, products, customers, invoices, returns });
+  return normalizeDb({ settings, products, customers, invoices, returns, whatsappMessages });
 }
 
 async function writeMongoDb(appDb) {
@@ -119,6 +126,7 @@ async function writeMongoDb(appDb) {
     replaceMongoCollection(db, "customers", normalized.customers),
     replaceMongoCollection(db, "invoices", normalized.invoices),
     replaceMongoCollection(db, "returns", normalized.returns),
+    replaceMongoCollection(db, "whatsappMessages", normalized.whatsappMessages),
     db.collection("settings").replaceOne(
       { id: "settings" },
       { id: "settings", ...normalized.settings },
@@ -490,6 +498,66 @@ function normalizeWhatsAppPhone(phone) {
   return digits;
 }
 
+function customerForWhatsAppPhone(db, phone) {
+  const normalized = normalizeWhatsAppPhone(phone);
+  return db.customers.find((customer) => normalizeWhatsAppPhone(customer.phone) === normalized) || null;
+}
+
+function whatsappMessageText(message) {
+  if (message.text?.body) return message.text.body;
+  if (message.button?.text) return message.button.text;
+  if (message.interactive?.button_reply?.title) return message.interactive.button_reply.title;
+  if (message.interactive?.list_reply?.title) return message.interactive.list_reply.title;
+  if (message.image) return message.image.caption || "[Image]";
+  if (message.document) return message.document.caption || message.document.filename || "[Document]";
+  if (message.audio) return "[Audio]";
+  if (message.video) return message.video.caption || "[Video]";
+  if (message.sticker) return "[Sticker]";
+  return `[${message.type || "message"}]`;
+}
+
+function parseWhatsAppWebhookEvents(db, body) {
+  const events = [];
+  for (const entry of body.entry || []) {
+    for (const change of entry.changes || []) {
+      if (change.field !== "messages") continue;
+      const value = change.value || {};
+      for (const message of value.messages || []) {
+        const customer = customerForWhatsAppPhone(db, message.from);
+        events.push({
+          id: message.id || makeId("wam"),
+          direction: "incoming",
+          from: normalizeWhatsAppPhone(message.from),
+          to: value.metadata?.display_phone_number || "",
+          customerKey: customer?.key || "",
+          customerName: customer?.name || value.contacts?.find((contact) => contact.wa_id === message.from)?.profile?.name || "",
+          type: message.type || "unknown",
+          text: whatsappMessageText(message),
+          mediaId: message.image?.id || message.document?.id || message.audio?.id || message.video?.id || "",
+          timestamp: message.timestamp ? new Date(Number(message.timestamp) * 1000).toISOString() : new Date().toISOString(),
+          raw: message,
+        });
+      }
+      for (const status of value.statuses || []) {
+        events.push({
+          id: status.id || makeId("was"),
+          direction: "status",
+          from: "",
+          to: normalizeWhatsAppPhone(status.recipient_id),
+          customerKey: customerForWhatsAppPhone(db, status.recipient_id)?.key || "",
+          customerName: customerForWhatsAppPhone(db, status.recipient_id)?.name || "",
+          type: "status",
+          text: status.status || "status",
+          status: status.status || "",
+          timestamp: status.timestamp ? new Date(Number(status.timestamp) * 1000).toISOString() : new Date().toISOString(),
+          raw: status,
+        });
+      }
+    }
+  }
+  return events;
+}
+
 function whatsappConfigured() {
   return Boolean(whatsappAccessToken && whatsappPhoneNumberId);
 }
@@ -627,6 +695,74 @@ async function sendWhatsAppImage({ to, mediaId, caption }) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(payload?.error?.message || "WhatsApp image message failed.");
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+
+function templateTextParameter(value) {
+  return {
+    type: "text",
+    text: String(value ?? ""),
+  };
+}
+
+function templateBodyComponent(values) {
+  return {
+    type: "body",
+    parameters: values.map(templateTextParameter),
+  };
+}
+
+function templateImageHeaderComponent(mediaId) {
+  return {
+    type: "header",
+    parameters: [
+      {
+        type: "image",
+        image: { id: mediaId },
+      },
+    ],
+  };
+}
+
+async function sendWhatsAppTemplate({ to, templateName, languageCode = whatsappTemplateLanguage, bodyValues = [], imageMediaId = "" }) {
+  if (!whatsappConfigured()) {
+    const error = new Error("WhatsApp is not configured. Add WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID.");
+    error.status = 400;
+    throw error;
+  }
+  const normalizedPhone = normalizeWhatsAppPhone(to);
+  if (!normalizedPhone) {
+    const error = new Error("A valid WhatsApp phone number is required.");
+    error.status = 400;
+    throw error;
+  }
+  const components = [];
+  if (imageMediaId) components.push(templateImageHeaderComponent(imageMediaId));
+  if (bodyValues.length) components.push(templateBodyComponent(bodyValues));
+  const response = await fetch(`https://graph.facebook.com/${whatsappApiVersion}/${whatsappPhoneNumberId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${whatsappAccessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: normalizedPhone,
+      type: "template",
+      template: {
+        name: templateName,
+        language: { code: languageCode },
+        ...(components.length ? { components } : {}),
+      },
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload?.error?.message || "WhatsApp template message failed.");
     error.status = response.status;
     throw error;
   }
@@ -1060,6 +1196,40 @@ app.get("/api/whatsapp/status", (req, res) => {
   res.json({ configured: whatsappConfigured() });
 });
 
+app.get("/api/whatsapp/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+  if (mode === "subscribe" && token === whatsappWebhookVerifyToken) {
+    res.status(200).send(challenge);
+    return;
+  }
+  res.sendStatus(403);
+});
+
+app.post("/api/whatsapp/webhook", async (req, res, next) => {
+  try {
+    const db = await readDb();
+    const events = parseWhatsAppWebhookEvents(db, req.body || {});
+    if (events.length) {
+      const existingIds = new Set((db.whatsappMessages || []).map((message) => message.id));
+      const newEvents = events.filter((event) => !existingIds.has(event.id));
+      db.whatsappMessages = [...(db.whatsappMessages || []), ...newEvents]
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+        .slice(0, 1000);
+      if (mongoUri) {
+        const mongoDb = await getMongoDb();
+        if (newEvents.length) await mongoDb.collection("whatsappMessages").insertMany(newEvents);
+      } else {
+        await writeDb(db);
+      }
+    }
+    res.sendStatus(200);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/customers/whatsapp-opt-in", async (req, res, next) => {
   try {
     const db = await readDb();
@@ -1113,11 +1283,16 @@ app.post("/api/whatsapp/send-invoice", async (req, res, next) => {
       res.status(400).json({ error: "Customer phone number is required." });
       return;
     }
-    const result = await sendWhatsAppText({
+    const result = await sendWhatsAppTemplate({
       to: phone,
-      text: invoiceWhatsAppText(invoice),
+      templateName: whatsappInvoiceTemplate,
+      bodyValues: [
+        invoice.customer?.name || "Customer",
+        invoice.id,
+        `₹${formatCurrency(invoice.totals?.total)}`,
+      ],
     });
-    res.json({ ok: true, messageId: result?.messages?.[0]?.id || "" });
+    res.json({ ok: true, messageId: result?.messages?.[0]?.id || "", mode: "template", template: whatsappInvoiceTemplate });
   } catch (error) {
     next(error);
   }
@@ -1126,12 +1301,7 @@ app.post("/api/whatsapp/send-invoice", async (req, res, next) => {
 app.post("/api/whatsapp/send-campaign", async (req, res, next) => {
   try {
     const db = await readDb();
-    const message = String(req.body.message || "").trim();
     const imageData = String(req.body.imageData || "");
-    if (!message && !imageData) {
-      res.status(400).json({ error: "Campaign message or image is required." });
-      return;
-    }
     const recipients = db.customers.filter((customer) => customer.whatsappOptIn && normalizeWhatsAppPhone(customer.phone));
     if (!recipients.length) {
       res.status(400).json({ error: "No WhatsApp opted-in customers with phone numbers found." });
@@ -1141,13 +1311,13 @@ app.post("/api/whatsapp/send-campaign", async (req, res, next) => {
     const results = [];
     for (const customer of recipients) {
       try {
-        const personalizedMessage = message
-          .replaceAll("{name}", customer.name || "Customer")
-          .replaceAll("{shop}", db.settings.shopName || "Alter");
-        const result = mediaId
-          ? await sendWhatsAppImage({ to: customer.phone, mediaId, caption: personalizedMessage })
-          : await sendWhatsAppText({ to: customer.phone, text: personalizedMessage });
-        results.push({ key: customer.key, name: customer.name, phone: customer.phone, ok: true, messageId: result?.messages?.[0]?.id || "" });
+        const result = await sendWhatsAppTemplate({
+          to: customer.phone,
+          templateName: whatsappPromotionTemplate,
+          bodyValues: [customer.name || "Customer"],
+          imageMediaId: mediaId,
+        });
+        results.push({ key: customer.key, name: customer.name, phone: customer.phone, ok: true, messageId: result?.messages?.[0]?.id || "", mode: "template" });
       } catch (error) {
         results.push({ key: customer.key, name: customer.name, phone: customer.phone, ok: false, error: error.message });
       }
@@ -1156,6 +1326,8 @@ app.post("/api/whatsapp/send-campaign", async (req, res, next) => {
       ok: results.some((result) => result.ok),
       sent: results.filter((result) => result.ok).length,
       failed: results.filter((result) => !result.ok).length,
+      mode: "template",
+      template: whatsappPromotionTemplate,
       results,
     });
   } catch (error) {

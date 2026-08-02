@@ -862,6 +862,11 @@ textarea:focus {
   gap: 18px;
 }
 
+.whatsapp-inbox-stack {
+  display: grid;
+  gap: 18px;
+}
+
 .sales-range-controls {
   display: flex;
   flex-wrap: wrap;
@@ -932,6 +937,20 @@ textarea:focus {
   border: 1px solid #edf0f3;
   border-radius: 8px;
   background: #ffffff;
+}
+
+.whatsapp-message-card {
+  grid-template-columns: minmax(220px, 1fr) minmax(240px, 2fr) auto;
+}
+
+.whatsapp-message-card.status {
+  background: #fbfcfc;
+}
+
+.whatsapp-message-text {
+  color: var(--ink);
+  font-weight: 750;
+  overflow-wrap: anywhere;
 }
 
 .product-data-card {

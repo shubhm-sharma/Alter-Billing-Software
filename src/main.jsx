@@ -169,6 +169,7 @@ function App() {
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerForm, setCustomerForm] = useState(null);
   const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [whatsappInboxSearch, setWhatsappInboxSearch] = useState("");
   const [returnSearch, setReturnSearch] = useState("");
   const [selectedReturnInvoiceId, setSelectedReturnInvoiceId] = useState("");
   const [returnType, setReturnType] = useState("return");
@@ -368,6 +369,20 @@ function App() {
       .reverse()
       .filter((item) => [item.id, item.customer.name, item.customer.phone].join(" ").toLowerCase().includes(query));
   }, [state, invoiceSearch]);
+
+  const filteredWhatsappMessages = useMemo(() => {
+    if (!state) return [];
+    const query = whatsappInboxSearch.trim().toLowerCase();
+    return (state.whatsappMessages || [])
+      .slice()
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      .filter((message) =>
+        [message.customerName, message.from, message.to, message.text, message.status]
+          .join(" ")
+          .toLowerCase()
+          .includes(query)
+      );
+  }, [state, whatsappInboxSearch]);
 
   const daySalesInvoices = useMemo(() => {
     if (!state) return [];
@@ -634,10 +649,6 @@ function App() {
 
   async function sendWhatsAppCampaign(event) {
     event.preventDefault();
-    if (!whatsappCampaignMessage.trim() && !whatsappCampaignImage.data) {
-      showNotice("Enter a WhatsApp campaign message or attach an image");
-      return;
-    }
     const confirmed = window.confirm(`Send this WhatsApp message to ${whatsappOptedInCustomers.length} opted-in customers?`);
     if (!confirmed) return;
     setIsSendingCampaign(true);
@@ -1214,6 +1225,7 @@ function App() {
     products: "Product barcodes",
     customers: "Customers",
     history: "Sales history",
+    whatsapp: "WhatsApp inbox",
     returns: "Returns and exchanges",
     settings: "Settings",
   }[activeView];
@@ -1232,6 +1244,7 @@ function App() {
               ["products", "Products"],
               ["customers", "Customers"],
               ["history", "Sales"],
+              ["whatsapp", "WhatsApp"],
               ["returns", "Returns"],
               ["settings", "Settings"],
             ].map(([key, label]) => (
@@ -1695,12 +1708,12 @@ function App() {
                   </button>
                 </div>
                 <label>
-                  Campaign message
+                  Campaign note
                   <textarea
                     rows="4"
                     value={whatsappCampaignMessage}
                     onChange={(event) => setWhatsappCampaignMessage(event.target.value)}
-                    placeholder="Hi {name}, new arrivals are now available at {shop}. Visit us today."
+                    placeholder="Internal note for this campaign"
                   />
                 </label>
                 <div className="campaign-image-field">
@@ -1720,7 +1733,7 @@ function App() {
                     </div>
                   )}
                 </div>
-                <p className="panel-note">Messages are sent only to customers who allowed WhatsApp updates. Use approved Meta templates for marketing campaigns outside WhatsApp's customer-service window.</p>
+                <p className="panel-note">TAARA sends the approved Meta template alter_new_arrivals to opted-in customers. The selected image is sent as the template header when attached.</p>
                 <button className="primary-button" type="submit" disabled={isSendingCampaign || !whatsappOptedInCustomers.length}>
                   {isSendingCampaign ? "Sending..." : "Send WhatsApp campaign"}
                 </button>
@@ -1879,6 +1892,43 @@ function App() {
                     </div>
                   </article>
                 )) : <div className="empty-state">No invoices generated yet.</div>}
+              </ListPanel>
+            </section>
+          )}
+
+          {activeView === "whatsapp" && (
+            <section className="whatsapp-inbox-stack">
+              <section className="panel">
+                <div className="panel-title">
+                  <div>
+                    <h2>WhatsApp inbox</h2>
+                    <span>{(state.whatsappMessages || []).length} webhook events</span>
+                  </div>
+                  <button className="secondary-button" type="button" onClick={loadState}>Refresh</button>
+                </div>
+                <p className="panel-note">
+                  Incoming replies appear here after Meta webhooks are configured. Delivery/read events also show as status updates.
+                </p>
+              </section>
+              <ListPanel title="Messages" search={whatsappInboxSearch} setSearch={setWhatsappInboxSearch} placeholder="Search WhatsApp messages">
+                {filteredWhatsappMessages.length ? filteredWhatsappMessages.map((message) => (
+                  <article className={`data-card whatsapp-message-card ${message.direction}`} key={`${message.id}-${message.timestamp}`}>
+                    <div>
+                      <strong>
+                        {message.customerName || message.from || message.to || "WhatsApp"}
+                      </strong>
+                      <span>
+                        {message.direction === "incoming" ? `From ${message.from}` : `Status for ${message.to}`}
+                        {" · "}
+                        {new Date(message.timestamp).toLocaleString()}
+                      </span>
+                    </div>
+                    <span className="whatsapp-message-text">{message.text}</span>
+                    <span className={message.direction === "incoming" ? "status-badge success" : "status-badge muted"}>
+                      {message.direction === "incoming" ? message.type : message.status || "status"}
+                    </span>
+                  </article>
+                )) : <div className="empty-state">No WhatsApp messages yet.</div>}
               </ListPanel>
             </section>
           )}
