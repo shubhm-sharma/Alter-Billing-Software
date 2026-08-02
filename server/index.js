@@ -362,6 +362,7 @@ function upsertCustomer(db, invoice) {
     existing.invoiceCount += 1;
     existing.totalSpent += invoice.totals.total;
     existing.lastPurchase = invoice.date;
+    existing.source = existing.source || "invoice";
     return;
   }
   db.customers.push({
@@ -376,14 +377,38 @@ function upsertCustomer(db, invoice) {
     invoiceCount: 1,
     totalSpent: invoice.totals.total,
     lastPurchase: invoice.date,
+    source: "invoice",
   });
 }
 
-function summarizeCustomers(invoices) {
+function customerKey(customer) {
+  const phone = String(customer?.phone || "").trim();
+  return phone || String(customer?.name || "").trim().toLowerCase();
+}
+
+function summarizeCustomers(invoices, existingCustomers = []) {
   const customers = new Map();
+  for (const customer of existingCustomers) {
+    if (customer.source !== "manual") continue;
+    const key = customerKey(customer);
+    if (!key) continue;
+    customers.set(key, {
+      key,
+      name: customer.name || "",
+      phone: customer.phone || "",
+      address: customer.address || "",
+      gstin: customer.gstin || "",
+      stateCode: customer.stateCode || "",
+      whatsappOptIn: Boolean(customer.whatsappOptIn),
+      whatsappOptInAt: customer.whatsappOptInAt || "",
+      invoiceCount: 0,
+      totalSpent: 0,
+      lastPurchase: "",
+      source: "manual",
+    });
+  }
   for (const invoice of invoices) {
-    const phone = invoice.customer.phone.trim();
-    const key = phone || invoice.customer.name.trim().toLowerCase();
+    const key = customerKey(invoice.customer);
     if (!key) continue;
     const existing = customers.get(key);
     if (existing) {
@@ -410,6 +435,7 @@ function summarizeCustomers(invoices) {
         invoiceCount: 1,
         totalSpent: Number(invoice.totals.total || 0),
         lastPurchase: invoice.date,
+        source: "invoice",
       });
     }
   }
@@ -417,7 +443,7 @@ function summarizeCustomers(invoices) {
 }
 
 function rebuildCustomers(db) {
-  db.customers = summarizeCustomers(db.invoices);
+  db.customers = summarizeCustomers(db.invoices, db.customers);
 }
 
 async function upsertCustomerInMongo(invoice) {
@@ -437,6 +463,7 @@ async function upsertCustomerInMongo(invoice) {
         whatsappOptIn: Boolean(existing?.whatsappOptIn || invoice.customer.whatsappOptIn),
         whatsappOptInAt: invoice.customer.whatsappOptInAt || existing?.whatsappOptInAt || "",
         lastPurchase: invoice.date,
+        source: existing?.source || "invoice",
       },
       $setOnInsert: { key },
       $inc: {
@@ -448,9 +475,9 @@ async function upsertCustomerInMongo(invoice) {
   );
 }
 
-async function replaceMongoCustomers(invoices) {
+async function replaceMongoCustomers(invoices, existingCustomers = []) {
   const db = await getMongoDb();
-  await replaceMongoCollection(db, "customers", summarizeCustomers(invoices));
+  await replaceMongoCollection(db, "customers", summarizeCustomers(invoices, existingCustomers));
 }
 
 function invoiceStockChanges(invoice, direction) {
@@ -800,6 +827,52 @@ app.get("/api/customers/export.csv", async (req, res, next) => {
   }
 });
 
+app.post("/api/customers", async (req, res, next) => {
+  try {
+    const db = await readDb();
+    const customer = {
+      name: String(req.body.name || "").trim(),
+      phone: String(req.body.phone || "").trim(),
+      address: String(req.body.address || "").trim(),
+      gstin: String(req.body.gstin || "").trim().toUpperCase(),
+      stateCode: String(req.body.stateCode || "").trim(),
+      whatsappOptIn: Boolean(req.body.whatsappOptIn),
+      whatsappOptInAt: req.body.whatsappOptIn ? String(req.body.whatsappOptInAt || new Date().toISOString()) : "",
+    };
+    if (!customer.name) {
+      res.status(400).json({ error: "Customer name is required." });
+      return;
+    }
+
+    const key = customerKey(customer);
+    if (db.customers.some((item) => item.key === key || customerKey(item) === key)) {
+      res.status(409).json({ error: "Customer already exists." });
+      return;
+    }
+
+    const savedCustomer = {
+      key,
+      ...customer,
+      invoiceCount: 0,
+      totalSpent: 0,
+      lastPurchase: "",
+      source: "manual",
+    };
+    db.customers.push(savedCustomer);
+
+    if (mongoUri) {
+      const mongoDb = await getMongoDb();
+      await mongoDb.collection("customers").insertOne(savedCustomer);
+    } else {
+      await writeDb(db);
+    }
+
+    res.status(201).json(savedCustomer);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.put("/api/customers/:key", async (req, res, next) => {
   try {
     const db = await readDb();
@@ -818,12 +891,17 @@ app.put("/api/customers/:key", async (req, res, next) => {
       return;
     }
 
+    const newKey = customerKey(updatedCustomer);
+    if (db.customers.some((item) => item.key !== oldKey && customerKey(item) === newKey)) {
+      res.status(409).json({ error: "Another customer already uses these details." });
+      return;
+    }
+
+    const existingCustomer = db.customers.find((item) => item.key === oldKey || customerKey(item) === oldKey);
     const affectedInvoices = db.invoices.filter((invoice) => {
-      const phone = invoice.customer.phone.trim();
-      const key = phone || invoice.customer.name.trim().toLowerCase();
-      return key === oldKey;
+      return customerKey(invoice.customer) === oldKey;
     });
-    if (!affectedInvoices.length) {
+    if (!affectedInvoices.length && !existingCustomer) {
       res.status(404).json({ error: "Customer was not found." });
       return;
     }
@@ -832,11 +910,16 @@ app.put("/api/customers/:key", async (req, res, next) => {
       invoice.customer = { ...invoice.customer, ...updatedCustomer };
       invoice.editedAt = new Date().toISOString();
     }
+    if (existingCustomer) {
+      Object.assign(existingCustomer, {
+        ...updatedCustomer,
+        key: newKey,
+        source: existingCustomer.source || "manual",
+      });
+    }
     rebuildCustomers(db);
     const customer = db.customers.find((item) => {
-      const phone = item.phone?.trim();
-      const key = phone || item.name?.trim().toLowerCase();
-      return key === (updatedCustomer.phone || updatedCustomer.name.toLowerCase());
+      return customerKey(item) === newKey;
     });
 
     if (mongoUri) {
@@ -983,7 +1066,7 @@ app.put("/api/invoices/:id", async (req, res, next) => {
     if (mongoUri) {
       const mongoDb = await getMongoDb();
       await mongoDb.collection("invoices").replaceOne({ id: existing.id }, invoice);
-      await replaceMongoCustomers(db.invoices);
+      await replaceMongoCustomers(db.invoices, db.customers);
       await adjustMongoStock(stockChanges);
     } else {
       adjustLocalStock(db.products, stockChanges);
@@ -1016,7 +1099,7 @@ app.delete("/api/invoices/:id", async (req, res, next) => {
     if (mongoUri) {
       const mongoDb = await getMongoDb();
       await mongoDb.collection("invoices").deleteOne({ id: invoice.id });
-      await replaceMongoCustomers(db.invoices);
+      await replaceMongoCustomers(db.invoices, db.customers);
       await adjustMongoStock(stockChanges);
     } else {
       adjustLocalStock(db.products, stockChanges);

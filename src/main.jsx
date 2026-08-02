@@ -167,6 +167,7 @@ function App() {
   const [catalogSearch, setCatalogSearch] = useState("");
   const [catalogStockFilter, setCatalogStockFilter] = useState("all");
   const [customerSearch, setCustomerSearch] = useState("");
+  const [newCustomer, setNewCustomer] = useState(emptyCustomer);
   const [customerForm, setCustomerForm] = useState(null);
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [whatsappInboxSearch, setWhatsappInboxSearch] = useState("");
@@ -567,6 +568,25 @@ function App() {
       whatsappOptIn: Boolean(item.whatsappOptIn),
       whatsappOptInAt: item.whatsappOptInAt || "",
     });
+  }
+
+  async function addCustomer(event) {
+    event.preventDefault();
+    try {
+      const payload = {
+        ...newCustomer,
+        whatsappOptInAt: newCustomer.whatsappOptIn ? newCustomer.whatsappOptInAt || new Date().toISOString() : "",
+      };
+      const saved = await api("/api/customers", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setNewCustomer(emptyCustomer);
+      await loadState();
+      showNotice(`${saved.name} added`);
+    } catch (error) {
+      showNotice(error.message);
+    }
   }
 
   async function saveCustomer(event) {
@@ -1679,6 +1699,49 @@ function App() {
                 </div>
                 <p className="panel-note">Use this CSV in Excel or your messaging tool for promotional campaigns.</p>
               </section>
+              <form className="panel" onSubmit={addCustomer}>
+                <div className="panel-title">
+                  <h2>Add customer</h2>
+                  <button className="quiet-button" type="button" onClick={() => setNewCustomer(emptyCustomer)}>Clear</button>
+                </div>
+                <div className="field-grid">
+                  <label>
+                    Name
+                    <input value={newCustomer.name} onChange={(event) => setNewCustomer({ ...newCustomer, name: event.target.value })} required />
+                  </label>
+                  <label>
+                    Phone
+                    <input value={newCustomer.phone} onChange={(event) => setNewCustomer({ ...newCustomer, phone: event.target.value })} />
+                  </label>
+                  <label className="checkbox-row wide-field">
+                    <input
+                      type="checkbox"
+                      checked={newCustomer.whatsappOptIn}
+                      onChange={(event) =>
+                        setNewCustomer({
+                          ...newCustomer,
+                          whatsappOptIn: event.target.checked,
+                          whatsappOptInAt: event.target.checked ? newCustomer.whatsappOptInAt || new Date().toISOString() : "",
+                        })
+                      }
+                    />
+                    Allow WhatsApp bills and promotional messages
+                  </label>
+                  <label className="wide-field">
+                    Address
+                    <textarea rows="2" value={newCustomer.address} onChange={(event) => setNewCustomer({ ...newCustomer, address: event.target.value })} />
+                  </label>
+                  <label>
+                    GSTIN
+                    <input value={newCustomer.gstin} onChange={(event) => setNewCustomer({ ...newCustomer, gstin: event.target.value.toUpperCase() })} />
+                  </label>
+                  <label>
+                    State code
+                    <input maxLength="2" value={newCustomer.stateCode} onChange={(event) => setNewCustomer({ ...newCustomer, stateCode: event.target.value })} />
+                  </label>
+                </div>
+                <button className="primary-button" type="submit">Add customer</button>
+              </form>
               <form className="panel whatsapp-panel" onSubmit={sendWhatsAppCampaign}>
                 <div className="panel-title">
                   <div>
@@ -1790,16 +1853,21 @@ function App() {
               )}
               <ListPanel title="Customers" search={customerSearch} setSearch={setCustomerSearch} placeholder="Search customers">
                 {filteredCustomers.length ? filteredCustomers.map((item) => (
-                  <article className="data-card" key={item.key}>
-                    <div>
+                  <article className="customer-card" key={item.key}>
+                    <div className="customer-card-primary">
                       <strong>{item.name}</strong>
-                      <span>{item.phone || "No phone"} · {item.invoiceCount} bills · {money(item.totalSpent)}</span>
+                      <span>{item.invoiceCount} bills · {money(item.totalSpent)}</span>
                     </div>
-                    <span>{item.address}</span>
-                    <span className={item.whatsappOptIn ? "status-badge success" : "status-badge muted"}>
-                      {item.whatsappOptIn ? "WhatsApp yes" : "WhatsApp no"}
-                    </span>
-                    <button type="button" onClick={() => startEditCustomer(item)}>Edit</button>
+                    <div className="customer-card-details">
+                      <span>{item.phone || "No phone"}</span>
+                      <span>{item.address || "No address saved"}</span>
+                    </div>
+                    <div className="customer-card-actions">
+                      <span className={item.whatsappOptIn ? "status-badge success" : "status-badge muted"}>
+                        {item.whatsappOptIn ? "WhatsApp yes" : "WhatsApp no"}
+                      </span>
+                      <button className="quiet-button" type="button" onClick={() => startEditCustomer(item)}>Edit</button>
+                    </div>
                   </article>
                 )) : <div className="empty-state">No customers saved yet.</div>}
               </ListPanel>
