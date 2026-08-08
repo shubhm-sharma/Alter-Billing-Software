@@ -26,6 +26,7 @@ const whatsappWebhookVerifyToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || 
 const whatsappTemplateLanguage = process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en";
 const whatsappInvoiceTemplate = process.env.WHATSAPP_INVOICE_TEMPLATE || "invoice_sent";
 const whatsappPromotionTemplate = process.env.WHATSAPP_PROMOTION_TEMPLATE || "alter_new_arrivals";
+const whatsappGenericTemplate = process.env.WHATSAPP_GENERIC_TEMPLATE || "taara_generic_message";
 let mongoClientPromise;
 
 const defaultDb = {
@@ -1390,9 +1391,27 @@ app.post("/api/whatsapp/send-campaign", async (req, res, next) => {
   try {
     const db = await readDb();
     const imageData = String(req.body.imageData || "");
-    const recipients = db.customers.filter((customer) => customer.whatsappOptIn && normalizeWhatsAppPhone(customer.phone));
+    const campaignMode = req.body.templateMode === "generic" ? "generic" : "new_arrivals";
+    const message = String(req.body.message || "").trim();
+    const templateName = campaignMode === "generic" ? whatsappGenericTemplate : whatsappPromotionTemplate;
+    const requestedKeys = Array.isArray(req.body.recipientKeys)
+      ? req.body.recipientKeys.map((key) => String(key || "")).filter(Boolean)
+      : [];
+    if (campaignMode === "generic" && !message) {
+      res.status(400).json({ error: "Message is required for the generic WhatsApp template." });
+      return;
+    }
+    const allRecipients = db.customers.filter((customer) => customer.whatsappOptIn && normalizeWhatsAppPhone(customer.phone));
+    const requestedKeySet = new Set(requestedKeys);
+    const recipients = requestedKeys.length
+      ? allRecipients.filter((customer) => requestedKeySet.has(customer.key))
+      : allRecipients;
     if (!recipients.length) {
-      res.status(400).json({ error: "No WhatsApp opted-in customers with phone numbers found." });
+      res.status(400).json({
+        error: requestedKeys.length
+          ? "No selected WhatsApp opted-in customers with phone numbers found."
+          : "No WhatsApp opted-in customers with phone numbers found.",
+      });
       return;
     }
     const mediaId = imageData ? await uploadWhatsAppImage(imageData) : "";
@@ -1402,8 +1421,8 @@ app.post("/api/whatsapp/send-campaign", async (req, res, next) => {
       try {
         const result = await sendWhatsAppTemplate({
           to: customer.phone,
-          templateName: whatsappPromotionTemplate,
-          bodyValues: [customer.name || "Customer"],
+          templateName,
+          bodyValues: campaignMode === "generic" ? [customer.name || "Customer", message] : [customer.name || "Customer"],
           imageMediaId: mediaId,
         });
         results.push({
@@ -1440,11 +1459,12 @@ app.post("/api/whatsapp/send-campaign", async (req, res, next) => {
         customerKey: result.key,
         customerName: result.name,
         type: "template",
-        text: `Campaign template: ${whatsappPromotionTemplate}`,
+        text: campaignMode === "generic" ? message : `Campaign template: ${templateName}`,
         status: "accepted",
         timestamp: new Date().toISOString(),
         raw: {
-          template: whatsappPromotionTemplate,
+          template: templateName,
+          campaignMode,
           messageId: result.messageId,
         },
       }));
@@ -1465,7 +1485,8 @@ app.post("/api/whatsapp/send-campaign", async (req, res, next) => {
       sent: results.filter((result) => result.ok).length,
       failed: results.filter((result) => !result.ok).length,
       mode: "template",
-      template: whatsappPromotionTemplate,
+      campaignMode,
+      template: templateName,
       results,
     });
   } catch (error) {

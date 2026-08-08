@@ -189,6 +189,9 @@ function App() {
   const [salesReportEnd, setSalesReportEnd] = useState(dateKey());
   const [isBilling, setIsBilling] = useState(false);
   const [whatsappStatus, setWhatsappStatus] = useState({ configured: false });
+  const [whatsappCampaignTemplate, setWhatsappCampaignTemplate] = useState("new_arrivals");
+  const [whatsappCampaignTestMode, setWhatsappCampaignTestMode] = useState(false);
+  const [whatsappCampaignTestKeys, setWhatsappCampaignTestKeys] = useState([]);
   const [whatsappCampaignMessage, setWhatsappCampaignMessage] = useState("");
   const [whatsappCampaignImage, setWhatsappCampaignImage] = useState({ name: "", data: "" });
   const [whatsappCampaignResult, setWhatsappCampaignResult] = useState(null);
@@ -669,14 +672,28 @@ function App() {
 
   async function sendWhatsAppCampaign(event) {
     event.preventDefault();
-    const confirmed = window.confirm(`Send this WhatsApp message to ${whatsappOptedInCustomers.length} opted-in customers?`);
+    const recipientCount = whatsappCampaignTestMode ? whatsappCampaignTestKeys.length : whatsappOptedInCustomers.length;
+    if (!recipientCount) {
+      showNotice(whatsappCampaignTestMode ? "Select at least one test customer" : "No opted-in customers found");
+      return;
+    }
+    const confirmed = window.confirm(
+      whatsappCampaignTestMode
+        ? `Send this WhatsApp test message to ${recipientCount} selected customers?`
+        : `Send this WhatsApp message to ${recipientCount} opted-in customers?`
+    );
     if (!confirmed) return;
     setIsSendingCampaign(true);
     setWhatsappCampaignResult(null);
     try {
       const result = await api("/api/whatsapp/send-campaign", {
         method: "POST",
-        body: JSON.stringify({ message: whatsappCampaignMessage, imageData: whatsappCampaignImage.data }),
+        body: JSON.stringify({
+          templateMode: whatsappCampaignTemplate,
+          message: whatsappCampaignMessage,
+          imageData: whatsappCampaignImage.data,
+          recipientKeys: whatsappCampaignTestMode ? whatsappCampaignTestKeys : [],
+        }),
       });
       setWhatsappCampaignResult(result);
       await loadState();
@@ -1772,12 +1789,71 @@ function App() {
                   </button>
                 </div>
                 <label>
-                  Campaign note
+                  Template
+                  <select value={whatsappCampaignTemplate} onChange={(event) => setWhatsappCampaignTemplate(event.target.value)}>
+                    <option value="new_arrivals">New arrivals</option>
+                    <option value="generic">Generic message</option>
+                  </select>
+                </label>
+                <div className="campaign-test-box">
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={whatsappCampaignTestMode}
+                      onChange={(event) => {
+                        setWhatsappCampaignTestMode(event.target.checked);
+                        if (!event.target.checked) setWhatsappCampaignTestKeys([]);
+                      }}
+                    />
+                    Test mode: send only to selected customers
+                  </label>
+                  {whatsappCampaignTestMode && (
+                    <div className="campaign-test-panel">
+                      <div className="campaign-test-toolbar">
+                        <span>{whatsappCampaignTestKeys.length} selected</span>
+                        <button
+                          className="quiet-button"
+                          type="button"
+                          onClick={() => setWhatsappCampaignTestKeys(whatsappOptedInCustomers.map((item) => item.key))}
+                        >
+                          Select all
+                        </button>
+                        <button className="quiet-button" type="button" onClick={() => setWhatsappCampaignTestKeys([])}>
+                          Clear
+                        </button>
+                      </div>
+                      <div className="campaign-test-list">
+                        {whatsappOptedInCustomers.map((item) => (
+                          <label className="campaign-test-customer" key={item.key}>
+                            <input
+                              type="checkbox"
+                              checked={whatsappCampaignTestKeys.includes(item.key)}
+                              onChange={(event) =>
+                                setWhatsappCampaignTestKeys((current) =>
+                                  event.target.checked
+                                    ? [...new Set([...current, item.key])]
+                                    : current.filter((key) => key !== item.key)
+                                )
+                              }
+                            />
+                            <span>
+                              <strong>{item.name || "Customer"}</strong>
+                              <small>{item.phone}</small>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <label>
+                  {whatsappCampaignTemplate === "generic" ? "Message" : "Campaign note"}
                   <textarea
                     rows="4"
                     value={whatsappCampaignMessage}
                     onChange={(event) => setWhatsappCampaignMessage(event.target.value)}
-                    placeholder="Internal note for this campaign"
+                    placeholder={whatsappCampaignTemplate === "generic" ? "Message to send in the approved generic template" : "Internal note for this campaign"}
+                    required={whatsappCampaignTemplate === "generic"}
                   />
                 </label>
                 <div className="campaign-image-field">
@@ -1797,9 +1873,17 @@ function App() {
                     </div>
                   )}
                 </div>
-                <p className="panel-note">TAARA sends the approved Meta template alter_new_arrivals to opted-in customers. The selected image is sent as the template header when attached.</p>
-                <button className="primary-button" type="submit" disabled={isSendingCampaign || !whatsappOptedInCustomers.length}>
-                  {isSendingCampaign ? "Sending..." : "Send WhatsApp campaign"}
+                <p className="panel-note">
+                  {whatsappCampaignTemplate === "generic"
+                    ? "TAARA sends the approved Meta template taara_generic_message with the customer name and your message. The selected image is sent as the template header when attached."
+                    : "TAARA sends the approved Meta template alter_new_arrivals to opted-in customers. The selected image is sent as the template header when attached."}
+                </p>
+                <button
+                  className="primary-button"
+                  type="submit"
+                  disabled={isSendingCampaign || !whatsappOptedInCustomers.length || (whatsappCampaignTestMode && !whatsappCampaignTestKeys.length)}
+                >
+                  {isSendingCampaign ? "Sending..." : whatsappCampaignTestMode ? "Send test message" : "Send WhatsApp campaign"}
                 </button>
                 {whatsappCampaignResult && (
                   <div className="campaign-result">
