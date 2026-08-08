@@ -566,6 +566,10 @@ function parseWhatsAppWebhookEvents(db, body) {
         });
       }
       for (const status of value.statuses || []) {
+        const statusError = status.errors?.[0];
+        const statusText = statusError
+          ? `${status.status || "status"}: ${statusError.title || statusError.message || statusError.code || "WhatsApp delivery error"}`
+          : status.status || "status";
         events.push({
           id: status.id || makeId("was"),
           direction: "status",
@@ -574,7 +578,7 @@ function parseWhatsAppWebhookEvents(db, body) {
           customerKey: customerForWhatsAppPhone(db, status.recipient_id)?.key || "",
           customerName: customerForWhatsAppPhone(db, status.recipient_id)?.name || "",
           type: "status",
-          text: status.status || "status",
+          text: statusText,
           status: status.status || "",
           timestamp: status.timestamp ? new Date(Number(status.timestamp) * 1000).toISOString() : new Date().toISOString(),
           raw: status,

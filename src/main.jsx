@@ -679,7 +679,8 @@ function App() {
         body: JSON.stringify({ message: whatsappCampaignMessage, imageData: whatsappCampaignImage.data }),
       });
       setWhatsappCampaignResult(result);
-      showNotice(`WhatsApp campaign sent: ${result.sent} sent, ${result.failed} failed`);
+      await loadState();
+      showNotice(`WhatsApp campaign accepted: ${result.sent} accepted, ${result.failed} failed`);
     } catch (error) {
       showNotice(error.message);
     } finally {
