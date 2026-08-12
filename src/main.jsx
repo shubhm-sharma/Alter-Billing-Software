@@ -2074,7 +2074,7 @@ function App() {
                   <button className="secondary-button" type="button" onClick={loadState}>Refresh</button>
                 </div>
                 <p className="panel-note">
-                  Incoming replies appear here after Meta webhooks are configured. Delivery/read events also show as status updates.
+                  Incoming replies appear here only when Meta sends the WhatsApp messages webhook to TAARA. Delivery/read/failed updates appear as status rows.
                 </p>
               </section>
               <ListPanel title="Messages" search={whatsappInboxSearch} setSearch={setWhatsappInboxSearch} placeholder="Search WhatsApp messages">

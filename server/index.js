@@ -590,6 +590,10 @@ function parseWhatsAppWebhookEvents(db, body) {
   return events;
 }
 
+function whatsappStoredEventKey(event) {
+  return [event.direction || "", event.id || "", event.status || "", event.type || ""].join(":");
+}
+
 function whatsappConfigured() {
   return Boolean(whatsappAccessToken && whatsappPhoneNumberId);
 }
@@ -1301,8 +1305,8 @@ app.post("/api/whatsapp/webhook", async (req, res, next) => {
     const db = await readDb();
     const events = parseWhatsAppWebhookEvents(db, req.body || {});
     if (events.length) {
-      const existingIds = new Set((db.whatsappMessages || []).map((message) => message.id));
-      const newEvents = events.filter((event) => !existingIds.has(event.id));
+      const existingKeys = new Set((db.whatsappMessages || []).map(whatsappStoredEventKey));
+      const newEvents = events.filter((event) => !existingKeys.has(whatsappStoredEventKey(event)));
       db.whatsappMessages = [...(db.whatsappMessages || []), ...newEvents]
         .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
         .slice(0, 1000);
@@ -1452,7 +1456,7 @@ app.post("/api/whatsapp/send-campaign", async (req, res, next) => {
     const acceptedEvents = results
       .filter((result) => result.ok)
       .map((result) => ({
-        id: result.messageId || makeId("wao"),
+        id: result.messageId ? `out-${result.messageId}` : makeId("wao"),
         direction: "outgoing",
         from: whatsappPhoneNumberId,
         to: result.normalizedPhone,
