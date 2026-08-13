@@ -2077,6 +2077,32 @@ function App() {
                   Incoming replies appear here only when Meta sends the WhatsApp messages webhook to TAARA. Delivery/read/failed updates appear as status rows.
                 </p>
               </section>
+              <section className="panel">
+                <div className="panel-title">
+                  <div>
+                    <h2>Webhook diagnostics</h2>
+                    <span>{(state.whatsappWebhookLogs || []).length} recent POSTs</span>
+                  </div>
+                </div>
+                {state.whatsappWebhookLogs?.length ? (
+                  <div className="webhook-diagnostics">
+                    {state.whatsappWebhookLogs.slice(0, 5).map((log) => (
+                      <article className="webhook-log-card" key={log.id}>
+                        <div>
+                          <strong>{new Date(log.timestamp).toLocaleString()}</strong>
+                          <span>{log.eventCount} parsed events · {log.incomingCount} replies · {log.statusCount} statuses</span>
+                        </div>
+                        <span>{(log.fields || []).join(", ") || "No fields"}</span>
+                        <small>
+                          {log.sample?.statuses?.[0]?.text || log.sample?.messages?.[0]?.text || "Webhook received, but no messages/statuses parsed"}
+                        </small>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-state">No webhook POSTs received yet.</div>
+                )}
+              </section>
               <ListPanel title="Messages" search={whatsappInboxSearch} setSearch={setWhatsappInboxSearch} placeholder="Search WhatsApp messages">
                 {filteredWhatsappMessages.length ? filteredWhatsappMessages.map((message) => (
                   <article className={`data-card whatsapp-message-card ${message.direction}`} key={`${message.id}-${message.timestamp}`}>

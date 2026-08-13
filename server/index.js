@@ -49,6 +49,7 @@ const defaultDb = {
   invoices: [],
   returns: [],
   whatsappMessages: [],
+  whatsappWebhookLogs: [],
 };
 
 const app = express();
@@ -94,6 +95,7 @@ function normalizeDb(db = {}) {
     invoices: Array.isArray(db.invoices) ? db.invoices : [],
     returns: Array.isArray(db.returns) ? db.returns : [],
     whatsappMessages: Array.isArray(db.whatsappMessages) ? db.whatsappMessages : [],
+    whatsappWebhookLogs: Array.isArray(db.whatsappWebhookLogs) ? db.whatsappWebhookLogs : [],
   };
 }
 
@@ -107,16 +109,17 @@ async function getMongoDb() {
 
 async function readMongoDb() {
   const db = await getMongoDb();
-  const [settings, products, customers, invoices, returns, whatsappMessages] = await Promise.all([
+  const [settings, products, customers, invoices, returns, whatsappMessages, whatsappWebhookLogs] = await Promise.all([
     db.collection("settings").findOne({ id: "settings" }, { projection: { _id: 0 } }),
     db.collection("products").find({}, { projection: { _id: 0 } }).toArray(),
     db.collection("customers").find({}, { projection: { _id: 0 } }).toArray(),
     db.collection("invoices").find({}, { projection: { _id: 0 } }).toArray(),
     db.collection("returns").find({}, { projection: { _id: 0 } }).toArray(),
     db.collection("whatsappMessages").find({}, { projection: { _id: 0 } }).toArray(),
+    db.collection("whatsappWebhookLogs").find({}, { projection: { _id: 0 } }).sort({ timestamp: -1 }).limit(50).toArray(),
   ]);
 
-  return normalizeDb({ settings, products, customers, invoices, returns, whatsappMessages });
+  return normalizeDb({ settings, products, customers, invoices, returns, whatsappMessages, whatsappWebhookLogs });
 }
 
 async function writeMongoDb(appDb) {
@@ -128,6 +131,7 @@ async function writeMongoDb(appDb) {
     replaceMongoCollection(db, "invoices", normalized.invoices),
     replaceMongoCollection(db, "returns", normalized.returns),
     replaceMongoCollection(db, "whatsappMessages", normalized.whatsappMessages),
+    replaceMongoCollection(db, "whatsappWebhookLogs", normalized.whatsappWebhookLogs),
     db.collection("settings").replaceOne(
       { id: "settings" },
       { id: "settings", ...normalized.settings },
@@ -1304,6 +1308,28 @@ app.post("/api/whatsapp/webhook", async (req, res, next) => {
   try {
     const db = await readDb();
     const events = parseWhatsAppWebhookEvents(db, req.body || {});
+    const webhookLog = {
+      id: makeId("whl"),
+      timestamp: new Date().toISOString(),
+      eventCount: events.length,
+      incomingCount: events.filter((event) => event.direction === "incoming").length,
+      statusCount: events.filter((event) => event.direction === "status").length,
+      fields: [...new Set((req.body?.entry || []).flatMap((entry) => (entry.changes || []).map((change) => change.field || "unknown")))],
+      object: req.body?.object || "",
+      sample: {
+        messages: events.filter((event) => event.direction === "incoming").slice(0, 3).map((event) => ({
+          from: event.from,
+          text: event.text,
+          type: event.type,
+        })),
+        statuses: events.filter((event) => event.direction === "status").slice(0, 5).map((event) => ({
+          to: event.to,
+          status: event.status,
+          text: event.text,
+        })),
+      },
+    };
+    db.whatsappWebhookLogs = [webhookLog, ...(db.whatsappWebhookLogs || [])].slice(0, 50);
     if (events.length) {
       const existingKeys = new Set((db.whatsappMessages || []).map(whatsappStoredEventKey));
       const newEvents = events.filter((event) => !existingKeys.has(whatsappStoredEventKey(event)));
@@ -1312,10 +1338,16 @@ app.post("/api/whatsapp/webhook", async (req, res, next) => {
         .slice(0, 1000);
       if (mongoUri) {
         const mongoDb = await getMongoDb();
+        await mongoDb.collection("whatsappWebhookLogs").insertOne(webhookLog);
         if (newEvents.length) await mongoDb.collection("whatsappMessages").insertMany(newEvents);
       } else {
         await writeDb(db);
       }
+    } else if (mongoUri) {
+      const mongoDb = await getMongoDb();
+      await mongoDb.collection("whatsappWebhookLogs").insertOne(webhookLog);
+    } else {
+      await writeDb(db);
     }
     res.sendStatus(200);
   } catch (error) {
