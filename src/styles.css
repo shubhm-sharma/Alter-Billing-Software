@@ -1012,6 +1012,61 @@ textarea:focus {
   font-size: 13px;
 }
 
+.pending-payment-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 16px;
+  align-items: start;
+}
+
+.pending-payment-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.pending-invoice-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid #edf0f3;
+  border-radius: 8px;
+  background: #fbfcfc;
+}
+
+.pending-invoice-row input {
+  width: 18px;
+  min-height: 18px;
+}
+
+.pending-invoice-row span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pending-invoice-row small {
+  color: var(--muted);
+}
+
+.pending-invoice-row b {
+  color: var(--forest);
+  white-space: nowrap;
+}
+
+.pending-payment-actions {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #edf0f3;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
 .sales-range-controls {
   display: flex;
   flex-wrap: wrap;
@@ -1467,6 +1522,10 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 
+  .pending-payment-layout {
+    grid-template-columns: 1fr;
+  }
+
   .return-lookup-panel {
     position: static;
   }
@@ -1554,8 +1613,17 @@ textarea:focus {
 
   .sales-report-grid,
   .sales-range-controls,
-  .sales-day-controls {
+  .sales-day-controls,
+  .pending-invoice-row {
     grid-template-columns: 1fr;
+  }
+
+  .pending-invoice-row {
+    align-items: start;
+  }
+
+  .pending-invoice-row b {
+    justify-self: start;
   }
 
   .sales-report-grid {

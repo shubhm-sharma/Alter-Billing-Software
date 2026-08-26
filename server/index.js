@@ -202,11 +202,33 @@ function invoiceLineCredit(invoice, item) {
   return Math.max(0, Number(item.qty || 0) * Number(item.price || 0) - Number(item.discount || 0));
 }
 
+function invoiceDateFromInput(value, fallback = new Date().toISOString()) {
+  const raw = String(value || "").trim();
+  if (!raw) return fallback;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const date = new Date(`${raw}T12:00:00.000Z`);
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
+  }
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  const error = new Error("Invoice date is invalid.");
+  error.status = 400;
+  throw error;
+}
+
+function invoiceBalanceAmount(invoice) {
+  const total = Math.max(0, Number(invoice?.totals?.total || 0));
+  const paid = Math.max(0, Number(invoice?.totals?.paid || 0));
+  const storedBalance = Number(invoice?.totals?.balance);
+  if (Number.isFinite(storedBalance)) return Math.max(0, storedBalance);
+  return Math.max(0, total - paid);
+}
+
 function buildInvoice(db, body, { id, date } = {}) {
   const items = Array.isArray(body.items) ? body.items : [];
   return {
     id,
-    date: date || new Date().toISOString(),
+    date: date || invoiceDateFromInput(body.date),
     customer: {
       name: String(body.customer.name || "").trim(),
       phone: String(body.customer.phone || "").trim(),
@@ -366,7 +388,7 @@ function upsertCustomer(db, invoice) {
     existing.whatsappOptInAt = invoice.customer.whatsappOptInAt || existing.whatsappOptInAt || "";
     existing.invoiceCount += 1;
     existing.totalSpent += invoice.totals.total;
-    existing.lastPurchase = invoice.date;
+    if (!existing.lastPurchase || invoice.date > existing.lastPurchase) existing.lastPurchase = invoice.date;
     existing.source = existing.source || "invoice";
     return;
   }
@@ -467,9 +489,9 @@ async function upsertCustomerInMongo(invoice) {
         stateCode: invoice.customer.stateCode,
         whatsappOptIn: Boolean(existing?.whatsappOptIn || invoice.customer.whatsappOptIn),
         whatsappOptInAt: invoice.customer.whatsappOptInAt || existing?.whatsappOptInAt || "",
-        lastPurchase: invoice.date,
         source: existing?.source || "invoice",
       },
+      $max: { lastPurchase: invoice.date },
       $setOnInsert: { key },
       $inc: {
         invoiceCount: 1,
@@ -1046,6 +1068,89 @@ app.post("/api/invoices", async (req, res, next) => {
   }
 });
 
+app.patch("/api/invoices/payments", async (req, res, next) => {
+  try {
+    const db = await readDb();
+    const invoiceIds = Array.isArray(req.body.invoiceIds)
+      ? req.body.invoiceIds.map((id) => String(id || "").trim()).filter(Boolean)
+      : [];
+    if (!invoiceIds.length) {
+      res.status(400).json({ error: "Select at least one pending invoice." });
+      return;
+    }
+
+    const paymentMode = String(req.body.paymentMode || "Cash").trim() || "Cash";
+    const paymentDate = invoiceDateFromInput(req.body.paymentDate);
+    const amountRaw = String(req.body.amount ?? "").trim();
+    let remainingAmount = amountRaw ? Number(amountRaw) : null;
+    if (remainingAmount !== null && (!Number.isFinite(remainingAmount) || remainingAmount <= 0)) {
+      res.status(400).json({ error: "Payment amount must be greater than zero." });
+      return;
+    }
+
+    const selected = db.invoices
+      .filter((invoice) => invoiceIds.includes(invoice.id))
+      .sort((first, second) => new Date(first.date) - new Date(second.date));
+    if (!selected.length) {
+      res.status(404).json({ error: "No matching invoices were found." });
+      return;
+    }
+
+    const updates = [];
+    for (const invoice of selected) {
+      const balance = invoiceBalanceAmount(invoice);
+      if (balance <= 0) continue;
+      const applied = remainingAmount === null ? balance : Math.min(balance, remainingAmount);
+      if (applied <= 0) break;
+
+      const paid = Math.max(0, Number(invoice.totals?.paid || 0)) + applied;
+      invoice.totals = {
+        ...(invoice.totals || {}),
+        paid,
+        balance: Math.max(0, Number(invoice.totals?.total || 0) - paid),
+      };
+      invoice.paymentMode = paymentMode;
+      invoice.paymentUpdates = [
+        ...(Array.isArray(invoice.paymentUpdates) ? invoice.paymentUpdates : []),
+        {
+          amount: applied,
+          paymentMode,
+          paymentDate,
+          recordedAt: new Date().toISOString(),
+        },
+      ];
+      invoice.editedAt = new Date().toISOString();
+      updates.push({ id: invoice.id, applied, balance: invoice.totals.balance });
+      if (remainingAmount !== null) remainingAmount -= applied;
+    }
+
+    if (!updates.length) {
+      res.status(400).json({ error: "Selected invoices do not have any pending balance." });
+      return;
+    }
+
+    if (mongoUri) {
+      const mongoDb = await getMongoDb();
+      await Promise.all(updates.map((update) => {
+        const invoice = db.invoices.find((item) => item.id === update.id);
+        return mongoDb.collection("invoices").replaceOne({ id: invoice.id }, invoice);
+      }));
+    } else {
+      await writeDb(db);
+    }
+
+    res.json({
+      ok: true,
+      updates,
+      applied: updates.reduce((sum, update) => sum + update.applied, 0),
+      remaining: Math.max(0, Number(remainingAmount || 0)),
+      invoices: updates.map((update) => db.invoices.find((invoice) => invoice.id === update.id)),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.put("/api/invoices/:id", async (req, res, next) => {
   try {
     const db = await readDb();
@@ -1065,7 +1170,7 @@ app.put("/api/invoices/:id", async (req, res, next) => {
     }
 
     const invoice = {
-      ...buildInvoice(db, req.body, { id: existing.id, date: existing.date }),
+      ...buildInvoice(db, req.body, { id: existing.id, date: invoiceDateFromInput(req.body.date, existing.date) }),
       editedAt: new Date().toISOString(),
     };
     const invoiceIndex = db.invoices.findIndex((item) => item.id === existing.id);

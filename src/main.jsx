@@ -127,6 +127,14 @@ function invoiceLineValue(invoice, item) {
   return Math.max(0, Number(item.qty || 0) * Number(item.price || 0) - Number(item.discount || 0));
 }
 
+function invoiceBalance(invoice) {
+  const total = Math.max(0, Number(invoice?.totals?.total || 0));
+  const paid = Math.max(0, Number(invoice?.totals?.paid || 0));
+  const balance = Number(invoice?.totals?.balance);
+  if (Number.isFinite(balance)) return Math.max(0, balance);
+  return Math.max(0, total - paid);
+}
+
 function applyPrintPage(invoiceType) {
   let style = document.getElementById("print-page-size");
   if (!style) {
@@ -163,6 +171,7 @@ function App() {
   const [discountValue, setDiscountValue] = useState(0);
   const [amountPaid, setAmountPaid] = useState(0);
   const [paymentMode, setPaymentMode] = useState("Cash");
+  const [invoiceDate, setInvoiceDate] = useState(dateKey());
   const [productForm, setProductForm] = useState(emptyProduct);
   const [catalogSearch, setCatalogSearch] = useState("");
   const [catalogStockFilter, setCatalogStockFilter] = useState("all");
@@ -170,6 +179,11 @@ function App() {
   const [newCustomer, setNewCustomer] = useState(emptyCustomer);
   const [customerForm, setCustomerForm] = useState(null);
   const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [selectedPendingInvoiceIds, setSelectedPendingInvoiceIds] = useState([]);
+  const [bulkPaymentAmount, setBulkPaymentAmount] = useState("");
+  const [bulkPaymentMode, setBulkPaymentMode] = useState("Cash");
+  const [bulkPaymentDate, setBulkPaymentDate] = useState(dateKey());
+  const [isUpdatingPayments, setIsUpdatingPayments] = useState(false);
   const [whatsappInboxSearch, setWhatsappInboxSearch] = useState("");
   const [returnSearch, setReturnSearch] = useState("");
   const [selectedReturnInvoiceId, setSelectedReturnInvoiceId] = useState("");
@@ -373,6 +387,33 @@ function App() {
       .reverse()
       .filter((item) => [item.id, item.customer.name, item.customer.phone].join(" ").toLowerCase().includes(query));
   }, [state, invoiceSearch]);
+
+  const pendingInvoices = useMemo(() => {
+    if (!state) return [];
+    return state.invoices
+      .filter((invoice) => invoiceBalance(invoice) > 0)
+      .sort((first, second) => new Date(first.date) - new Date(second.date));
+  }, [state]);
+
+  const selectedPendingInvoices = useMemo(
+    () => pendingInvoices.filter((invoice) => selectedPendingInvoiceIds.includes(invoice.id)),
+    [pendingInvoices, selectedPendingInvoiceIds]
+  );
+
+  const pendingTotal = useMemo(
+    () => pendingInvoices.reduce((sum, invoice) => sum + invoiceBalance(invoice), 0),
+    [pendingInvoices]
+  );
+
+  const selectedPendingTotal = useMemo(
+    () => selectedPendingInvoices.reduce((sum, invoice) => sum + invoiceBalance(invoice), 0),
+    [selectedPendingInvoices]
+  );
+
+  useEffect(() => {
+    const validIds = new Set(pendingInvoices.map((invoice) => invoice.id));
+    setSelectedPendingInvoiceIds((current) => current.filter((id) => validIds.has(id)));
+  }, [pendingInvoices]);
 
   const filteredWhatsappMessages = useMemo(() => {
     if (!state) return [];
@@ -766,6 +807,34 @@ function App() {
     downloadCsv(`alter-sales-${salesReportStart}-to-${salesReportEnd}.csv`, rows);
   }
 
+  async function updateSelectedPayments(event) {
+    event.preventDefault();
+    if (!selectedPendingInvoiceIds.length) {
+      showNotice("Select at least one pending invoice");
+      return;
+    }
+    setIsUpdatingPayments(true);
+    try {
+      const result = await api("/api/invoices/payments", {
+        method: "PATCH",
+        body: JSON.stringify({
+          invoiceIds: selectedPendingInvoiceIds,
+          amount: bulkPaymentAmount,
+          paymentMode: bulkPaymentMode,
+          paymentDate: bulkPaymentDate,
+        }),
+      });
+      setSelectedPendingInvoiceIds([]);
+      setBulkPaymentAmount("");
+      await loadState();
+      showNotice(`Updated ${result.updates.length} invoices with ${money(result.applied)}`);
+    } catch (error) {
+      showNotice(error.message);
+    } finally {
+      setIsUpdatingPayments(false);
+    }
+  }
+
   function scanBarcode(event) {
     event.preventDefault();
     const code = barcode.trim();
@@ -927,6 +996,7 @@ function App() {
     setInvoiceType(invoice.invoiceType === "gst" ? "gst" : "regular");
     setGstType(invoice.gstType === "interstate" ? "interstate" : "intrastate");
     setPaymentMode(invoice.paymentMode || "Cash");
+    setInvoiceDate(dateKey(invoice.date));
     setDiscountMode(invoice.totals?.discountMode === "percentage" ? "percentage" : "fixed");
     setDiscountValue(Number(invoice.totals?.discountValue || 0));
     setAmountPaid(Number(invoice.totals?.paid || invoice.totals?.total || 0));
@@ -969,6 +1039,7 @@ function App() {
     setAmountPaid(0);
     setDiscountMode("fixed");
     setDiscountValue(0);
+    setInvoiceDate(dateKey());
     showNotice("Invoice edit cancelled");
   }
 
@@ -1222,6 +1293,7 @@ function App() {
           }),
           totals,
           paymentMode,
+          date: invoiceDate,
           invoiceType,
           gstType,
         }),
@@ -1237,6 +1309,7 @@ function App() {
       setAmountPaid(0);
       setDiscountMode("fixed");
       setDiscountValue(0);
+      setInvoiceDate(dateKey());
       await loadState();
       window.setTimeout(() => window.print(), 100);
     } catch (error) {
@@ -1520,6 +1593,10 @@ function App() {
                   <span>{editingInvoiceId || `${state.settings.invoicePrefix}-${String(state.invoices.length + 1).padStart(5, "0")}`}</span>
                 </div>
                 <div className="field-grid compact">
+                  <label>
+                    Bill date
+                    <input type="date" value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} />
+                  </label>
                   <label>
                     Bill discount type
                     <select value={discountMode} onChange={(event) => setDiscountMode(event.target.value)}>
@@ -1975,6 +2052,83 @@ function App() {
 
           {activeView === "history" && (
             <section className="sales-stack">
+              <section className="panel pending-payments-panel">
+                <div className="panel-title">
+                  <div>
+                    <h2>Pending payments</h2>
+                    <span>{pendingInvoices.length} invoices · {money(pendingTotal)} due</span>
+                  </div>
+                  <button
+                    className="quiet-button"
+                    type="button"
+                    disabled={!pendingInvoices.length}
+                    onClick={() =>
+                      setSelectedPendingInvoiceIds((current) =>
+                        current.length === pendingInvoices.length ? [] : pendingInvoices.map((invoice) => invoice.id)
+                      )
+                    }
+                  >
+                    {selectedPendingInvoiceIds.length === pendingInvoices.length && pendingInvoices.length ? "Clear selection" : "Select all"}
+                  </button>
+                </div>
+                {pendingInvoices.length ? (
+                  <form className="pending-payment-layout" onSubmit={updateSelectedPayments}>
+                    <div className="pending-payment-list">
+                      {pendingInvoices.map((invoice) => (
+                        <label className="pending-invoice-row" key={invoice.id}>
+                          <input
+                            type="checkbox"
+                            checked={selectedPendingInvoiceIds.includes(invoice.id)}
+                            onChange={(event) =>
+                              setSelectedPendingInvoiceIds((current) =>
+                                event.target.checked
+                                  ? [...new Set([...current, invoice.id])]
+                                  : current.filter((id) => id !== invoice.id)
+                              )
+                            }
+                          />
+                          <span>
+                            <strong>{invoice.id} · {invoice.customer.name}</strong>
+                            <small>{new Date(invoice.date).toLocaleDateString("en-IN")} · {invoice.customer.phone || "No phone"}</small>
+                          </span>
+                          <b>{money(invoiceBalance(invoice))}</b>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="pending-payment-actions">
+                      <label>
+                        Payment date
+                        <input type="date" value={bulkPaymentDate} onChange={(event) => setBulkPaymentDate(event.target.value)} />
+                      </label>
+                      <label>
+                        Payment mode
+                        <select value={bulkPaymentMode} onChange={(event) => setBulkPaymentMode(event.target.value)}>
+                          <option>Cash</option>
+                          <option>UPI</option>
+                          <option>Card</option>
+                          <option>Mixed</option>
+                        </select>
+                      </label>
+                      <label>
+                        Amount
+                        <input
+                          min="0"
+                          step="0.01"
+                          type="number"
+                          value={bulkPaymentAmount}
+                          onChange={(event) => setBulkPaymentAmount(event.target.value)}
+                          placeholder={`Full due ${formattedAmount(selectedPendingTotal)}`}
+                        />
+                      </label>
+                      <button className="primary-button" type="submit" disabled={isUpdatingPayments || !selectedPendingInvoiceIds.length}>
+                        {isUpdatingPayments ? "Updating..." : "Update payments"}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="empty-state">No pending payments right now.</div>
+                )}
+              </section>
               <section className="panel sales-report-panel">
                 <div className="panel-title">
                   <h2>Sales / P&L report</h2>
@@ -2022,43 +2176,51 @@ function App() {
                 </div>
               </section>
               <ListPanel title="Sales history" search={invoiceSearch} setSearch={setInvoiceSearch} placeholder="Search invoices">
-                {filteredInvoices.length ? filteredInvoices.map((invoice) => (
-                  <article className="data-card" key={invoice.id}>
-                    <div>
-                      <strong>{invoice.id} · {invoice.customer.name}</strong>
-                      <span>{invoice.invoiceType === "gst" ? "GST" : "Regular"} · {new Date(invoice.date).toLocaleString()} · {invoice.paymentMode} · {money(invoice.totals.total)}</span>
-                    </div>
-                    <div className="card-actions">
-                      <button type="button" onClick={() => startEditInvoice(invoice)}>Edit</button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setLastReturn(null);
-                          setSalesPrint(null);
-                          setLastInvoice({
-                            ...invoice,
-                            shop: {
-                              ...invoice.shop,
-                              receiptFooter: state.settings.receiptFooter,
-                            },
-                          });
-                          applyPrintPage(invoice.invoiceType);
-                          window.setTimeout(() => window.print(), 100);
-                        }}
-                      >
-                        Print
-                      </button>
-                      <button
-                        type="button"
-                        disabled={sendingWhatsAppInvoiceId === invoice.id}
-                        onClick={() => sendInvoiceWhatsApp(invoice)}
-                      >
-                        {sendingWhatsAppInvoiceId === invoice.id ? "Sending..." : "WhatsApp"}
-                      </button>
-                      <button className="quiet-danger" type="button" onClick={() => deleteInvoice(invoice)}>Delete</button>
-                    </div>
-                  </article>
-                )) : <div className="empty-state">No invoices generated yet.</div>}
+                {filteredInvoices.length ? filteredInvoices.map((invoice) => {
+                  const due = invoiceBalance(invoice);
+                  return (
+                    <article className="data-card" key={invoice.id}>
+                      <div>
+                        <strong>{invoice.id} · {invoice.customer.name}</strong>
+                        <span>
+                          {invoice.invoiceType === "gst" ? "GST" : "Regular"} · {new Date(invoice.date).toLocaleString()} · {invoice.paymentMode} · Total {money(invoice.totals.total)} · Paid {money(invoice.totals?.paid || 0)}
+                        </span>
+                      </div>
+                      <span className={due > 0 ? "status-badge warning" : "status-badge success"}>
+                        {due > 0 ? `Due ${money(due)}` : "Paid"}
+                      </span>
+                      <div className="card-actions">
+                        <button type="button" onClick={() => startEditInvoice(invoice)}>Edit</button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLastReturn(null);
+                            setSalesPrint(null);
+                            setLastInvoice({
+                              ...invoice,
+                              shop: {
+                                ...invoice.shop,
+                                receiptFooter: state.settings.receiptFooter,
+                              },
+                            });
+                            applyPrintPage(invoice.invoiceType);
+                            window.setTimeout(() => window.print(), 100);
+                          }}
+                        >
+                          Print
+                        </button>
+                        <button
+                          type="button"
+                          disabled={sendingWhatsAppInvoiceId === invoice.id}
+                          onClick={() => sendInvoiceWhatsApp(invoice)}
+                        >
+                          {sendingWhatsAppInvoiceId === invoice.id ? "Sending..." : "WhatsApp"}
+                        </button>
+                        <button className="quiet-danger" type="button" onClick={() => deleteInvoice(invoice)}>Delete</button>
+                      </div>
+                    </article>
+                  );
+                }) : <div className="empty-state">No invoices generated yet.</div>}
               </ListPanel>
             </section>
           )}
