@@ -2865,7 +2865,7 @@ function ReceiptBarcode({ value }) {
 function UpiPaymentQr({ invoice }) {
   const [qrDataUrl, setQrDataUrl] = useState("");
   const upiId = invoice.shop.upiId || "Q925031435@ybl";
-  const amount = Number(invoice.totals.total || 0).toFixed(2);
+  const amount = (invoiceBalance(invoice) || Number(invoice.totals.total || 0)).toFixed(2);
 
   useEffect(() => {
     let cancelled = false;
@@ -2893,8 +2893,8 @@ function UpiPaymentQr({ invoice }) {
 
   return (
     <div className="upi-payment">
-      <strong>Scan to pay {receiptMoney(invoice.totals.total)}</strong>
-      {qrDataUrl && <img src={qrDataUrl} alt={`UPI QR for ${receiptMoney(invoice.totals.total)}`} />}
+      <strong>Scan to pay {receiptMoney(amount)}</strong>
+      {qrDataUrl && <img src={qrDataUrl} alt={`UPI QR for ${receiptMoney(amount)}`} />}
       <span>{upiId}</span>
     </div>
   );
@@ -2923,6 +2923,27 @@ function PrintOutput({ invoice, returnRecord, salesPrint }) {
 function DaySalesReceipt({ report }) {
   const shop = report.shop || {};
   const printedAt = new Date();
+  const soldItems = [...report.invoices
+    .flatMap((invoice) =>
+      invoice.items.map((item) => ({
+        item,
+        invoice,
+        key: `${item.name}-${Number(item.price || 0)}`,
+      }))
+    )
+    .reduce((items, entry) => {
+      const existing = items.get(entry.key) || {
+        name: entry.item.name,
+        qty: 0,
+        price: Number(entry.item.price || 0),
+        amount: 0,
+      };
+      existing.qty += Number(entry.item.qty || 0);
+      existing.amount += invoiceLineValue(entry.invoice, entry.item);
+      items.set(entry.key, existing);
+      return items;
+    }, new Map())
+    .values()].sort((first, second) => first.name.localeCompare(second.name));
 
   return (
     <section className="print-output thermal-print" aria-hidden="true">
@@ -2941,6 +2962,28 @@ function DaySalesReceipt({ report }) {
         <div className="receipt-line"><span>Discount</span><strong>{receiptMoney(report.summary.discount)}</strong></div>
         <div className="receipt-line"><span>Tax</span><strong>{receiptMoney(report.summary.tax)}</strong></div>
         <div className="receipt-total"><span>Net sales</span><strong>{receiptMoney(report.summary.total)}</strong></div>
+        <div className="receipt-rule" />
+        <strong>Items sold</strong>
+        <table className="daily-sales-table daily-items-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Qty</th>
+              <th>Price</th>
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {soldItems.map((item) => (
+              <tr key={`${item.name}-${item.price}`}>
+                <td>{item.name}</td>
+                <td>{item.qty}</td>
+                <td>{formattedAmount(item.price)}</td>
+                <td>{formattedAmount(item.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
         <div className="receipt-rule" />
         <strong>Payment summary</strong>
         <div className="receipt-line"><span>Cash</span><strong>{receiptMoney(report.summary.cash)}</strong></div>
@@ -3054,6 +3097,8 @@ function ReturnSlip({ record }) {
 }
 
 function Receipt({ invoice }) {
+  const fullyPaidInCash = invoice.paymentMode === "Cash" && invoiceBalance(invoice) <= 0;
+
   return (
     <section className="print-output thermal-print" aria-hidden="true">
       <div className="receipt">
@@ -3096,7 +3141,7 @@ function Receipt({ invoice }) {
         <div className="receipt-line"><span>Tax</span><strong>{receiptMoney(invoice.totals.tax)}</strong></div>
         <div className="receipt-total"><span>Total</span><strong>{receiptMoney(invoice.totals.total)}</strong></div>
         <p className="receipt-footer">{invoice.shop.receiptFooter}</p>
-        <UpiPaymentQr invoice={invoice} />
+        {!fullyPaidInCash && <UpiPaymentQr invoice={invoice} />}
         <div className="receipt-end-line" aria-hidden="true" />
       </div>
     </section>

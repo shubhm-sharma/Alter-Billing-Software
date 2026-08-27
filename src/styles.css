@@ -1889,6 +1889,30 @@ textarea:focus {
     text-align: right;
   }
 
+  .daily-items-table th:first-child,
+  .daily-items-table td:first-child {
+    width: 40%;
+    text-align: left;
+  }
+
+  .daily-items-table th:nth-child(2),
+  .daily-items-table td:nth-child(2) {
+    width: 14%;
+    text-align: center;
+  }
+
+  .daily-items-table th:nth-child(3),
+  .daily-items-table td:nth-child(3) {
+    width: 21%;
+    text-align: right;
+  }
+
+  .daily-items-table th:last-child,
+  .daily-items-table td:last-child {
+    width: 25%;
+    text-align: right;
+  }
+
   .return-slip-reason {
     margin-top: 2mm !important;
     padding-top: 2mm;
