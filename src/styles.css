@@ -1697,12 +1697,12 @@ textarea:focus {
 
   .price-sticker {
     display: grid;
-    grid-template-columns: 11mm 10mm 14mm 12mm;
-    gap: 0.5mm;
+    grid-template-columns: 15mm 8mm 10mm 14mm;
+    gap: 0.35mm;
     align-items: center;
     width: 50mm;
     height: 30mm;
-    padding: 0.8mm;
+    padding: 0.7mm;
     overflow: hidden;
     color: #000000;
     background: #ffffff;
@@ -1715,34 +1715,13 @@ textarea:focus {
     break-after: auto;
   }
 
-  .sticker-logo-panel,
   .sticker-name-panel,
+  .sticker-mrp-panel,
   .sticker-price-panel,
   .sticker-barcode-panel {
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-  }
-
-  .sticker-logo-panel {
-    display: grid;
-    place-items: center;
-    height: 28mm;
-  }
-
-  .sticker-logo-panel strong {
-    color: #20242a;
-    font-family: Georgia, "Times New Roman", serif;
-    font-size: 21px;
-    font-weight: 900;
-    line-height: 0.9;
-    letter-spacing: 0;
-    writing-mode: vertical-rl;
-    transform: rotate(180deg);
-  }
-
-  .sticker-logo-panel span {
-    color: #d76755;
   }
 
   .sticker-name-panel {
@@ -1764,20 +1743,26 @@ textarea:focus {
     transform: rotate(180deg);
   }
 
-  .sticker-price-panel {
+  .sticker-mrp-panel {
     display: grid;
-    grid-template-rows: 1fr auto;
-    justify-items: center;
-    align-items: center;
+    place-items: center;
     height: 28mm;
   }
 
-  .sticker-price-panel span {
-    font-size: 8px;
-    font-weight: 700;
+  .sticker-mrp-panel span {
+    color: #000000;
+    font-size: 7.5px;
+    font-weight: 800;
     line-height: 1;
+    white-space: nowrap;
     writing-mode: vertical-rl;
     transform: rotate(180deg);
+  }
+
+  .sticker-price-panel {
+    display: grid;
+    place-items: center;
+    height: 28mm;
   }
 
   .sticker-price-panel strong {
@@ -1786,7 +1771,8 @@ textarea:focus {
     font-weight: 900;
     line-height: 1;
     white-space: nowrap;
-    transform: rotate(-90deg);
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
   }
 
   .sticker-barcode-panel {
@@ -1799,8 +1785,8 @@ textarea:focus {
     top: 50%;
     left: 50%;
     width: 27mm;
-    height: 12mm;
-    transform: translate(-50%, -50%) rotate(90deg);
+    height: 13mm;
+    transform: translate(-50%, -50%) rotate(-90deg);
     transform-origin: center;
   }
 

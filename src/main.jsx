@@ -2983,14 +2983,13 @@ function ProductStickerPrint({ product, quantity }) {
     <section className="print-output sticker-print" aria-hidden="true">
       {labels.map((index) => (
         <div className="price-sticker" key={`${product.id}-${index}`}>
-          <div className="sticker-logo-panel">
-            <strong>Alter<span>.</span></strong>
-          </div>
           <div className="sticker-name-panel">
             <strong>{product.name || "Product title"}</strong>
           </div>
-          <div className="sticker-price-panel">
+          <div className="sticker-mrp-panel">
             <span>Maximum Retail Price</span>
+          </div>
+          <div className="sticker-price-panel">
             <strong>₹ {formattedAmount(product.price)}/-</strong>
           </div>
           <div className="sticker-barcode-panel">
