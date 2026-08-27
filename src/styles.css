@@ -1733,7 +1733,7 @@ textarea:focus {
   .sticker-name-panel strong {
     max-height: 29mm;
     color: #000000;
-    font-size: 11px;
+    font-size: 32px;
     font-weight: 800;
     line-height: 1.05;
     text-align: center;
@@ -1751,7 +1751,7 @@ textarea:focus {
 
   .sticker-mrp-panel span {
     color: #000000;
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 800;
     line-height: 1;
     white-space: nowrap;
@@ -1767,7 +1767,7 @@ textarea:focus {
 
   .sticker-price-panel strong {
     color: #000000;
-    font-size: 15px;
+    font-size: 26px;
     font-weight: 900;
     line-height: 1;
     white-space: nowrap;
