@@ -448,18 +448,22 @@ function App() {
   const daySalesSummary = useMemo(() => {
     return daySalesInvoices.reduce(
       (summary, invoice) => {
+        const total = Number(invoice.totals?.total || 0);
+        const pending = invoiceBalance(invoice);
+        const paid = Math.max(0, total - pending);
         summary.count += 1;
         summary.gross += Number(invoice.totals?.gross || 0);
         summary.discount += Number(invoice.totals?.discount || 0);
         summary.tax += Number(invoice.totals?.tax || 0);
-        summary.total += Number(invoice.totals?.total || 0);
-        summary.cash += invoice.paymentMode === "Cash" ? Number(invoice.totals?.total || 0) : 0;
-        summary.upi += invoice.paymentMode === "UPI" ? Number(invoice.totals?.total || 0) : 0;
-        summary.card += invoice.paymentMode === "Card" ? Number(invoice.totals?.total || 0) : 0;
-        summary.mixed += invoice.paymentMode === "Mixed" ? Number(invoice.totals?.total || 0) : 0;
+        summary.total += total;
+        summary.pending += pending;
+        summary.cash += invoice.paymentMode === "Cash" ? paid : 0;
+        summary.upi += invoice.paymentMode === "UPI" ? paid : 0;
+        summary.card += invoice.paymentMode === "Card" ? paid : 0;
+        summary.mixed += invoice.paymentMode === "Mixed" ? paid : 0;
         return summary;
       },
-      { count: 0, gross: 0, discount: 0, tax: 0, total: 0, cash: 0, upi: 0, card: 0, mixed: 0 }
+      { count: 0, gross: 0, discount: 0, tax: 0, total: 0, pending: 0, cash: 0, upi: 0, card: 0, mixed: 0 }
     );
   }, [daySalesInvoices]);
 
@@ -2900,10 +2904,10 @@ function ProductStickerBarcode({ value }) {
     try {
       JsBarcode(barcodeSvgRef.current, String(value), {
       format: "CODE128",
-      width: 1.2,
-      height: 54,
+      width: 1.35,
+      height: 60,
       displayValue: true,
-      fontSize: 11,
+      fontSize: 12,
         textMargin: 2,
         margin: 0,
         background: "#ffffff",
@@ -3071,6 +3075,7 @@ function DaySalesReceipt({ report }) {
         <div className="receipt-line"><span>UPI</span><strong>{receiptMoney(report.summary.upi)}</strong></div>
         <div className="receipt-line"><span>Card</span><strong>{receiptMoney(report.summary.card)}</strong></div>
         <div className="receipt-line"><span>Mixed</span><strong>{receiptMoney(report.summary.mixed)}</strong></div>
+        <div className="receipt-line"><span>Pending</span><strong>{receiptMoney(report.summary.pending)}</strong></div>
         <div className="receipt-rule" />
         <strong>Bill details</strong>
         <table className="daily-sales-table">

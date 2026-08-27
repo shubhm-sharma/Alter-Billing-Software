@@ -1697,12 +1697,12 @@ textarea:focus {
 
   .price-sticker {
     display: grid;
-    grid-template-columns: 16.5mm 8.5mm 10.5mm 12.8mm;
-    gap: 0.25mm;
+    grid-template-columns: 17.5mm 8.5mm 10.8mm 12.1mm;
+    gap: 0.15mm;
     align-items: center;
     width: 50mm;
     height: 30mm;
-    padding: 0.45mm;
+    padding: 0.2mm;
     overflow: hidden;
     color: #000000;
     background: #ffffff;
@@ -1727,13 +1727,13 @@ textarea:focus {
   .sticker-name-panel {
     display: grid;
     place-items: center;
-    height: 29mm;
+    height: 29.5mm;
   }
 
   .sticker-name-panel strong {
-    max-height: 29mm;
+    max-height: 29.5mm;
     color: #000000;
-    font-size: 16px;
+    font-size: 18px;
     font-weight: 800;
     line-height: 1.05;
     text-align: center;
@@ -1746,12 +1746,12 @@ textarea:focus {
   .sticker-mrp-panel {
     display: grid;
     place-items: center;
-    height: 29mm;
+    height: 29.5mm;
   }
 
   .sticker-mrp-panel span {
     color: #000000;
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 800;
     line-height: 1;
     white-space: nowrap;
@@ -1762,12 +1762,12 @@ textarea:focus {
   .sticker-price-panel {
     display: grid;
     place-items: center;
-    height: 29mm;
+    height: 29.5mm;
   }
 
   .sticker-price-panel strong {
     color: #000000;
-    font-size: 18px;
+    font-size: 21px;
     font-weight: 900;
     line-height: 1;
     white-space: nowrap;
@@ -1777,15 +1777,15 @@ textarea:focus {
 
   .sticker-barcode-panel {
     position: relative;
-    height: 29mm;
+    height: 29.5mm;
   }
 
   .sticker-barcode {
     position: absolute;
     top: 50%;
     left: 50%;
-    width: 28.5mm;
-    height: 12.4mm;
+    width: 29.4mm;
+    height: 11.8mm;
     transform: translate(-50%, -50%) rotate(-90deg);
     transform-origin: center;
   }
