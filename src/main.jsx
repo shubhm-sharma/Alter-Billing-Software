@@ -3013,7 +3013,7 @@ function DaySalesReceipt({ report }) {
       invoice.items.map((item) => ({
         item,
         invoice,
-        key: `${item.name}-${Number(item.price || 0)}`,
+        key: item.productId || item.barcode || String(item.name || "Unnamed item").trim().toLowerCase(),
       }))
     )
     .reduce((items, entry) => {
@@ -3021,8 +3021,10 @@ function DaySalesReceipt({ report }) {
         name: entry.item.name,
         qty: 0,
         price: Number(entry.item.price || 0),
+        hasMultiplePrices: false,
         amount: 0,
       };
+      if (existing.price !== Number(entry.item.price || 0)) existing.hasMultiplePrices = true;
       existing.qty += Number(entry.item.qty || 0);
       existing.amount += invoiceLineValue(entry.invoice, entry.item);
       items.set(entry.key, existing);
@@ -3063,7 +3065,7 @@ function DaySalesReceipt({ report }) {
               <tr key={`${item.name}-${item.price}`}>
                 <td>{item.name}</td>
                 <td>{item.qty}</td>
-                <td>{formattedAmount(item.price)}</td>
+                <td>{item.hasMultiplePrices ? "Varies" : formattedAmount(item.price)}</td>
                 <td>{formattedAmount(item.amount)}</td>
               </tr>
             ))}
