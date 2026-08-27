@@ -1730,11 +1730,19 @@ textarea:focus {
     height: 28mm;
   }
 
-  .sticker-logo-panel img {
-    width: 24mm;
-    max-width: none;
-    transform: rotate(-90deg);
-    filter: grayscale(1) contrast(1.55);
+  .sticker-logo-panel strong {
+    color: #20242a;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 21px;
+    font-weight: 900;
+    line-height: 0.9;
+    letter-spacing: 0;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+  }
+
+  .sticker-logo-panel span {
+    color: #d76755;
   }
 
   .sticker-name-panel {

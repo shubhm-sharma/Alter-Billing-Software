@@ -2984,10 +2984,10 @@ function ProductStickerPrint({ product, quantity }) {
       {labels.map((index) => (
         <div className="price-sticker" key={`${product.id}-${index}`}>
           <div className="sticker-logo-panel">
-            <img src="/alter-logo-cropped.png" alt="Alter" />
+            <strong>Alter<span>.</span></strong>
           </div>
           <div className="sticker-name-panel">
-            <strong>[{product.name || "Product title"}]</strong>
+            <strong>{product.name || "Product title"}</strong>
           </div>
           <div className="sticker-price-panel">
             <span>Maximum Retail Price</span>
