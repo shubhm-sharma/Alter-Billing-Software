@@ -2899,11 +2899,11 @@ function ProductStickerBarcode({ value }) {
     if (!barcodeSvgRef.current || !value) return;
     try {
       JsBarcode(barcodeSvgRef.current, String(value), {
-        format: "CODE128",
-        width: 1.2,
-        height: 48,
-        displayValue: true,
-        fontSize: 10,
+      format: "CODE128",
+      width: 1.2,
+      height: 54,
+      displayValue: true,
+      fontSize: 11,
         textMargin: 2,
         margin: 0,
         background: "#ffffff",
