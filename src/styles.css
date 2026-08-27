@@ -1691,6 +1691,111 @@ textarea:focus {
     width: 48mm;
   }
 
+  .sticker-print {
+    width: 50mm;
+  }
+
+  .price-sticker {
+    display: grid;
+    grid-template-columns: 12mm 10mm 13mm 12mm;
+    gap: 0.8mm;
+    align-items: center;
+    width: 50mm;
+    height: 30mm;
+    padding: 1mm;
+    overflow: hidden;
+    color: #000000;
+    background: #ffffff;
+    page-break-after: always;
+    break-after: page;
+  }
+
+  .price-sticker:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  .sticker-logo-panel,
+  .sticker-name-panel,
+  .sticker-price-panel,
+  .sticker-barcode-panel {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .sticker-logo-panel {
+    display: grid;
+    place-items: center;
+    height: 28mm;
+  }
+
+  .sticker-logo-panel img {
+    width: 28mm;
+    max-width: none;
+    transform: rotate(-90deg);
+    filter: grayscale(1) contrast(1.55);
+  }
+
+  .sticker-name-panel {
+    display: grid;
+    place-items: center;
+    height: 28mm;
+  }
+
+  .sticker-name-panel strong {
+    max-height: 28mm;
+    color: #000000;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1.05;
+    text-align: center;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+  }
+
+  .sticker-price-panel {
+    display: grid;
+    grid-template-rows: 1fr auto;
+    justify-items: center;
+    align-items: center;
+    height: 28mm;
+  }
+
+  .sticker-price-panel span {
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+  }
+
+  .sticker-price-panel strong {
+    color: #000000;
+    font-size: 13px;
+    font-weight: 900;
+    line-height: 1;
+    white-space: nowrap;
+    transform: rotate(-90deg);
+  }
+
+  .sticker-barcode-panel {
+    position: relative;
+    height: 28mm;
+  }
+
+  .sticker-barcode {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 28mm;
+    height: 13mm;
+    transform: translate(-50%, -50%) rotate(90deg);
+    transform-origin: center;
+  }
+
   .receipt {
     width: 48mm;
     padding: 3mm 2mm 10mm;

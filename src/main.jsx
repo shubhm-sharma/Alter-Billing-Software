@@ -142,7 +142,15 @@ function applyPrintPage(invoiceType) {
     style.id = "print-page-size";
     document.head.appendChild(style);
   }
-  style.textContent = invoiceType === "gst" ? "@page { size: A4; margin: 10mm; }" : "@page { size: 58mm auto; margin: 0; }";
+  if (invoiceType === "gst") {
+    style.textContent = "@page { size: A4; margin: 10mm; }";
+    return;
+  }
+  if (invoiceType === "sticker") {
+    style.textContent = "@page { size: 50mm 30mm; margin: 0; }";
+    return;
+  }
+  style.textContent = "@page { size: 58mm auto; margin: 0; }";
 }
 
 async function api(path, options = {}) {
@@ -196,6 +204,7 @@ function App() {
   const [exchangeManualItem, setExchangeManualItem] = useState(emptyManualItem);
   const [lastInvoice, setLastInvoice] = useState(null);
   const [lastReturn, setLastReturn] = useState(null);
+  const [stickerPrint, setStickerPrint] = useState(null);
   const [editingInvoiceId, setEditingInvoiceId] = useState("");
   const [salesPrint, setSalesPrint] = useState(null);
   const [salesPrintDate, setSalesPrintDate] = useState(dateKey());
@@ -1020,6 +1029,7 @@ function App() {
       showNotice("No sales found for selected date");
       return;
     }
+    setStickerPrint(null);
     setLastInvoice(null);
     setLastReturn(null);
     setSalesPrint({
@@ -1060,6 +1070,7 @@ function App() {
   }
 
   function printReturnSlip(record) {
+    setStickerPrint(null);
     setLastInvoice(null);
     setSalesPrint(null);
     setLastReturn({
@@ -1244,6 +1255,22 @@ function App() {
     await loadState();
   }
 
+  function printProductSticker(product) {
+    if (!product.barcode) {
+      showNotice("Add a barcode before printing a sticker");
+      return;
+    }
+    const requested = window.prompt("How many stickers should be printed?", "1");
+    if (requested === null) return;
+    const quantity = Math.max(1, Math.min(200, Number(requested) || 1));
+    setLastInvoice(null);
+    setLastReturn(null);
+    setSalesPrint(null);
+    setStickerPrint({ product, quantity });
+    applyPrintPage("sticker");
+    window.setTimeout(() => window.print(), 100);
+  }
+
   async function saveSettings(event) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -1298,6 +1325,7 @@ function App() {
           gstType,
         }),
       });
+      setStickerPrint(null);
       setLastReturn(null);
       setSalesPrint(null);
       setLastInvoice(invoice);
@@ -1770,6 +1798,7 @@ function App() {
                       </div>
                       <div className="card-actions product-card-actions">
                         <button type="button" onClick={() => setProductForm({ ...product, imageData: "", removeImage: false })}>Edit</button>
+                        <button type="button" onClick={() => printProductSticker(product)}>Sticker</button>
                         <button type="button" onClick={() => deleteProduct(product.id)}>Delete</button>
                       </div>
                     </article>
@@ -2192,10 +2221,11 @@ function App() {
                       <div className="card-actions">
                         <button type="button" onClick={() => startEditInvoice(invoice)}>Edit</button>
                         <button
-                          type="button"
-                          onClick={() => {
-                            setLastReturn(null);
-                            setSalesPrint(null);
+                        type="button"
+                        onClick={() => {
+                          setStickerPrint(null);
+                          setLastReturn(null);
+                          setSalesPrint(null);
                             setLastInvoice({
                               ...invoice,
                               shop: {
@@ -2793,7 +2823,7 @@ function App() {
         </div>
       )}
 
-      <PrintOutput invoice={lastInvoice} returnRecord={lastReturn} salesPrint={salesPrint} />
+      <PrintOutput invoice={lastInvoice} returnRecord={lastReturn} salesPrint={salesPrint} stickerPrint={stickerPrint} />
     </>
   );
 }
@@ -2862,6 +2892,31 @@ function ReceiptBarcode({ value }) {
   return <svg className="receipt-barcode" ref={barcodeSvgRef} aria-label={`Barcode ${value}`} />;
 }
 
+function ProductStickerBarcode({ value }) {
+  const barcodeSvgRef = useRef(null);
+
+  useEffect(() => {
+    if (!barcodeSvgRef.current || !value) return;
+    try {
+      JsBarcode(barcodeSvgRef.current, String(value), {
+        format: "CODE128",
+        width: 1.2,
+        height: 48,
+        displayValue: true,
+        fontSize: 10,
+        textMargin: 2,
+        margin: 0,
+        background: "#ffffff",
+        lineColor: "#000000",
+      });
+    } catch {
+      barcodeSvgRef.current.replaceChildren();
+    }
+  }, [value]);
+
+  return <svg className="sticker-barcode" ref={barcodeSvgRef} aria-label={`Barcode ${value}`} />;
+}
+
 function UpiPaymentQr({ invoice }) {
   const [qrDataUrl, setQrDataUrl] = useState("");
   const upiId = invoice.shop.upiId || "Q925031435@ybl";
@@ -2912,12 +2967,39 @@ function ListPanel({ title, search, setSearch, placeholder, children }) {
   );
 }
 
-function PrintOutput({ invoice, returnRecord, salesPrint }) {
+function PrintOutput({ invoice, returnRecord, salesPrint, stickerPrint }) {
+  if (stickerPrint) return <ProductStickerPrint product={stickerPrint.product} quantity={stickerPrint.quantity} />;
   if (salesPrint) return <DaySalesReceipt report={salesPrint} />;
   if (returnRecord) return <ReturnSlip record={returnRecord} />;
   if (!invoice) return <section className="print-output" aria-hidden="true" />;
   if (invoice.invoiceType === "gst") return <GstInvoice invoice={invoice} />;
   return <Receipt invoice={invoice} />;
+}
+
+function ProductStickerPrint({ product, quantity }) {
+  const labels = Array.from({ length: quantity }, (_, index) => index);
+
+  return (
+    <section className="print-output sticker-print" aria-hidden="true">
+      {labels.map((index) => (
+        <div className="price-sticker" key={`${product.id}-${index}`}>
+          <div className="sticker-logo-panel">
+            <img src="/alter-logo-cropped.png" alt="Alter" />
+          </div>
+          <div className="sticker-name-panel">
+            <strong>[{product.name || "Product title"}]</strong>
+          </div>
+          <div className="sticker-price-panel">
+            <span>Maximum Retail Price</span>
+            <strong>₹ {formattedAmount(product.price)}/-</strong>
+          </div>
+          <div className="sticker-barcode-panel">
+            <ProductStickerBarcode value={product.barcode} />
+          </div>
+        </div>
+      ))}
+    </section>
+  );
 }
 
 function DaySalesReceipt({ report }) {
