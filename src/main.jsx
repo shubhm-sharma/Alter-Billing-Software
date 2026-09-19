@@ -135,6 +135,38 @@ function invoiceBalance(invoice) {
   return Math.max(0, total - paid);
 }
 
+function returnRecordSalesAdjustment(record, invoices = []) {
+  const credit = Math.max(0, Number(record?.creditTotal || 0));
+  const replacement = Math.max(0, Number(record?.replacementTotal || 0));
+  if (record?.type !== "exchange") return -credit;
+
+  // Exchange replacements are already represented by a linked invoice. Older
+  // records without that invoice still need their replacement value included.
+  const hasExchangeInvoice = Boolean(
+    record.exchangeInvoiceId && invoices.some((invoice) => invoice.id === record.exchangeInvoiceId)
+  );
+  return hasExchangeInvoice ? -credit : replacement - credit;
+}
+
+function salesAdjustmentForRange(records, invoices, start, end) {
+  return (records || [])
+    .filter((record) => {
+      const key = dateKey(record.date);
+      return key >= start && key <= end;
+    })
+    .reduce((total, record) => total + returnRecordSalesAdjustment(record, invoices), 0);
+}
+
+function signedMoney(value) {
+  const amount = Number(value || 0);
+  return amount < 0 ? `-${money(Math.abs(amount))}` : money(amount);
+}
+
+function signedReceiptMoney(value) {
+  const amount = Number(value || 0);
+  return amount < 0 ? `-${receiptMoney(Math.abs(amount))}` : receiptMoney(amount);
+}
+
 function applyPrintPage(invoiceType) {
   let style = document.getElementById("print-page-size");
   if (!style) {
@@ -445,8 +477,13 @@ function App() {
       .sort((first, second) => new Date(first.date) - new Date(second.date));
   }, [state, salesPrintDate]);
 
+  const daySalesAdjustment = useMemo(
+    () => salesAdjustmentForRange(state?.returns, state?.invoices || [], salesPrintDate, salesPrintDate),
+    [state?.returns, state?.invoices, salesPrintDate]
+  );
+
   const daySalesSummary = useMemo(() => {
-    return daySalesInvoices.reduce(
+    const summary = daySalesInvoices.reduce(
       (summary, invoice) => {
         const total = Number(invoice.totals?.total || 0);
         const pending = invoiceBalance(invoice);
@@ -465,7 +502,10 @@ function App() {
       },
       { count: 0, gross: 0, discount: 0, tax: 0, total: 0, pending: 0, cash: 0, upi: 0, card: 0, mixed: 0 }
     );
-  }, [daySalesInvoices]);
+    summary.adjustments = daySalesAdjustment;
+    summary.netTotal = summary.total + daySalesAdjustment;
+    return summary;
+  }, [daySalesInvoices, daySalesAdjustment]);
 
   const rangeSalesInvoices = useMemo(() => {
     if (!state) return [];
@@ -477,9 +517,14 @@ function App() {
       .sort((first, second) => new Date(first.date) - new Date(second.date));
   }, [state, salesReportStart, salesReportEnd]);
 
+  const rangeSalesAdjustment = useMemo(
+    () => salesAdjustmentForRange(state?.returns, state?.invoices || [], salesReportStart, salesReportEnd),
+    [state?.returns, state?.invoices, salesReportStart, salesReportEnd]
+  );
+
   const rangeSalesSummary = useMemo(() => {
     const products = state?.products || [];
-    return rangeSalesInvoices.reduce(
+    const summary = rangeSalesInvoices.reduce(
       (summary, invoice) => {
         const cost = invoice.items.reduce((total, item) => {
           const product = products.find((candidate) => candidate.id === item.productId || candidate.barcode === item.barcode);
@@ -501,7 +546,11 @@ function App() {
       },
       { count: 0, gross: 0, discount: 0, tax: 0, total: 0, cost: 0, profit: 0, cash: 0, upi: 0, card: 0, mixed: 0 }
     );
-  }, [rangeSalesInvoices, state?.products]);
+    summary.adjustments = rangeSalesAdjustment;
+    summary.netTotal = summary.total + rangeSalesAdjustment;
+    summary.netProfit = summary.profit + rangeSalesAdjustment;
+    return summary;
+  }, [rangeSalesInvoices, state?.products, rangeSalesAdjustment]);
 
   const returnInvoiceMatches = useMemo(() => {
     if (!state) return [];
@@ -809,9 +858,11 @@ function App() {
       ["Gross", rangeSalesSummary.gross.toFixed(2)],
       ["Discount", rangeSalesSummary.discount.toFixed(2)],
       ["Tax", rangeSalesSummary.tax.toFixed(2)],
-      ["Net Sales", rangeSalesSummary.total.toFixed(2)],
+      ["Invoice Sales", rangeSalesSummary.total.toFixed(2)],
+      ["Returns / Exchanges", rangeSalesSummary.adjustments.toFixed(2)],
+      ["Net Sales", rangeSalesSummary.netTotal.toFixed(2)],
       ["Cost", rangeSalesSummary.cost.toFixed(2)],
-      ["Profit", rangeSalesSummary.profit.toFixed(2)],
+      ["Profit", rangeSalesSummary.netProfit.toFixed(2)],
       ["Cash", rangeSalesSummary.cash.toFixed(2)],
       ["UPI", rangeSalesSummary.upi.toFixed(2)],
       ["Card", rangeSalesSummary.card.toFixed(2)],
@@ -2187,9 +2238,11 @@ function App() {
                   <div><span>Gross</span><strong>{money(rangeSalesSummary.gross)}</strong></div>
                   <div><span>Discount</span><strong>{money(rangeSalesSummary.discount)}</strong></div>
                   <div><span>Tax</span><strong>{money(rangeSalesSummary.tax)}</strong></div>
-                  <div><span>Net sales</span><strong>{money(rangeSalesSummary.total)}</strong></div>
+                  <div><span>Invoice sales</span><strong>{money(rangeSalesSummary.total)}</strong></div>
+                  <div><span>Returns / exchanges</span><strong>{signedMoney(rangeSalesSummary.adjustments)}</strong></div>
+                  <div><span>Net sales</span><strong>{money(rangeSalesSummary.netTotal)}</strong></div>
                   <div><span>Cost</span><strong>{money(rangeSalesSummary.cost)}</strong></div>
-                  <div><span>Profit</span><strong>{money(rangeSalesSummary.profit)}</strong></div>
+                  <div><span>Profit</span><strong>{money(rangeSalesSummary.netProfit)}</strong></div>
                 </div>
               </section>
               <section className="panel sales-day-panel">
@@ -2203,8 +2256,9 @@ function App() {
                     <input type="date" value={salesPrintDate} onChange={(event) => setSalesPrintDate(event.target.value)} />
                   </label>
                   <div className="sales-day-total">
-                    <span>{daySalesSummary.count} bills</span>
-                    <strong>{money(daySalesSummary.total)}</strong>
+                    <span>{daySalesSummary.count} bills · Invoice sales {money(daySalesSummary.total)}</span>
+                    <small>Returns / exchanges {signedMoney(daySalesSummary.adjustments)}</small>
+                    <strong>{money(daySalesSummary.netTotal)}</strong>
                   </div>
                 </div>
               </section>
@@ -3048,7 +3102,9 @@ function DaySalesReceipt({ report }) {
         <div className="receipt-line"><span>Gross</span><strong>{receiptMoney(report.summary.gross)}</strong></div>
         <div className="receipt-line"><span>Discount</span><strong>{receiptMoney(report.summary.discount)}</strong></div>
         <div className="receipt-line"><span>Tax</span><strong>{receiptMoney(report.summary.tax)}</strong></div>
-        <div className="receipt-total"><span>Net sales</span><strong>{receiptMoney(report.summary.total)}</strong></div>
+        <div className="receipt-line"><span>Invoice sales</span><strong>{receiptMoney(report.summary.total)}</strong></div>
+        <div className="receipt-line"><span>Returns / exchanges</span><strong>{signedReceiptMoney(report.summary.adjustments)}</strong></div>
+        <div className="receipt-total"><span>Net sales</span><strong>{receiptMoney(report.summary.netTotal)}</strong></div>
         <div className="receipt-rule" />
         <strong>Items sold</strong>
         <table className="daily-sales-table daily-items-table">

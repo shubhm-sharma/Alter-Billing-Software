@@ -1128,6 +1128,11 @@ textarea:focus {
   font-size: 24px;
 }
 
+.sales-day-total small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .data-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
