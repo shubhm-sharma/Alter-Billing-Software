@@ -1133,6 +1133,67 @@ textarea:focus {
   font-size: 12px;
 }
 
+.gst-report-panel {
+  overflow: hidden;
+}
+
+.gst-report-summary-grid {
+  margin-bottom: 4px;
+}
+
+.gst-report-table-wrap {
+  margin-top: 20px;
+  overflow-x: auto;
+}
+
+.gst-report-table-wrap h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.report-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.report-table th,
+.report-table td {
+  padding: 10px 9px;
+  border-bottom: 1px solid #edf0f3;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.report-table th {
+  color: var(--muted);
+  background: #fbfcfc;
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.report-table th:first-child,
+.report-table td:first-child,
+.report-table th:nth-child(2),
+.report-table td:nth-child(2) {
+  text-align: left;
+}
+
+.gst-invoice-register-table th:nth-child(3),
+.gst-invoice-register-table td:nth-child(3),
+.gst-invoice-register-table th:nth-child(4),
+.gst-invoice-register-table td:nth-child(4),
+.gst-invoice-register-table th:nth-child(5),
+.gst-invoice-register-table td:nth-child(5) {
+  text-align: left;
+}
+
+.report-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
 .data-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;

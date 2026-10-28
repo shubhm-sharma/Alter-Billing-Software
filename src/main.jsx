@@ -242,6 +242,8 @@ function App() {
   const [salesPrintDate, setSalesPrintDate] = useState(dateKey());
   const [salesReportStart, setSalesReportStart] = useState(monthStartKey());
   const [salesReportEnd, setSalesReportEnd] = useState(dateKey());
+  const [gstReportStart, setGstReportStart] = useState(monthStartKey());
+  const [gstReportEnd, setGstReportEnd] = useState(dateKey());
   const [isBilling, setIsBilling] = useState(false);
   const [whatsappStatus, setWhatsappStatus] = useState({ configured: false });
   const [whatsappCampaignTemplate, setWhatsappCampaignTemplate] = useState("new_arrivals");
@@ -552,6 +554,78 @@ function App() {
     return summary;
   }, [rangeSalesInvoices, state?.products, rangeSalesAdjustment]);
 
+  const gstReportInvoices = useMemo(() => {
+    if (!state) return [];
+    return state.invoices
+      .filter((invoice) => {
+        const key = dateKey(invoice.date);
+        return invoice.invoiceType === "gst" && key >= gstReportStart && key <= gstReportEnd;
+      })
+      .sort((first, second) => new Date(first.date) - new Date(second.date));
+  }, [state, gstReportStart, gstReportEnd]);
+
+  const gstReportSummary = useMemo(
+    () =>
+      gstReportInvoices.reduce(
+        (summary, invoice) => {
+          const taxable = Number(invoice.totals?.taxable || 0);
+          const tax = Number(invoice.totals?.tax || 0);
+          const total = Number(invoice.totals?.total || 0);
+          const pending = invoiceBalance(invoice);
+          summary.taxable += taxable;
+          summary.tax += tax;
+          summary.total += total;
+          summary.paid += Math.max(0, total - pending);
+          summary.pending += pending;
+          if (invoice.gstType === "interstate") {
+            summary.igst += tax;
+          } else {
+            summary.cgst += tax / 2;
+            summary.sgst += tax / 2;
+          }
+          return summary;
+        },
+        { taxable: 0, cgst: 0, sgst: 0, igst: 0, tax: 0, total: 0, paid: 0, pending: 0 }
+      ),
+    [gstReportInvoices]
+  );
+
+  const gstHsnSummary = useMemo(() => {
+    const rows = new Map();
+    gstReportInvoices.forEach((invoice) => {
+      invoice.items.forEach((item) => {
+        const hsnCode = item.hsnCode || "NA";
+        const gstRate = Number(item.gstRate || 0);
+        const key = `${hsnCode}-${gstRate}`;
+        const taxable = Number(item.taxable || 0);
+        const tax = Number(item.gstAmount || 0);
+        const existing = rows.get(key) || {
+          hsnCode,
+          gstRate,
+          qty: 0,
+          taxable: 0,
+          cgst: 0,
+          sgst: 0,
+          igst: 0,
+          tax: 0,
+          total: 0,
+        };
+        existing.qty += Number(item.qty || 0);
+        existing.taxable += taxable;
+        existing.tax += tax;
+        existing.total += taxable + tax;
+        if (invoice.gstType === "interstate") {
+          existing.igst += tax;
+        } else {
+          existing.cgst += tax / 2;
+          existing.sgst += tax / 2;
+        }
+        rows.set(key, existing);
+      });
+    });
+    return [...rows.values()].sort((first, second) => first.hsnCode.localeCompare(second.hsnCode) || first.gstRate - second.gstRate);
+  }, [gstReportInvoices]);
+
   const returnInvoiceMatches = useMemo(() => {
     if (!state) return [];
     const query = returnSearch.trim().toLowerCase();
@@ -822,6 +896,103 @@ function App() {
     }
     setSalesReportStart(dateKey(now));
     setSalesReportEnd(dateKey(now));
+  }
+
+  function setGstRangePreset(preset) {
+    const now = new Date();
+    if (preset === "month") {
+      setGstReportStart(monthStartKey(now));
+      setGstReportEnd(monthEndKey(now));
+      return;
+    }
+    if (preset === "quarter") {
+      setGstReportStart(quarterStartKey(now));
+      setGstReportEnd(quarterEndKey(now));
+      return;
+    }
+    setGstReportStart(dateKey(now));
+    setGstReportEnd(dateKey(now));
+  }
+
+  function exportGstReportCsv() {
+    if (!gstReportInvoices.length) {
+      showNotice("No GST invoices found in selected range");
+      return;
+    }
+    const rows = [
+      ["GST Invoice Register"],
+      ["Period", `${gstReportStart} to ${gstReportEnd}`],
+      [],
+      [
+        "Invoice",
+        "Date",
+        "Customer",
+        "Phone",
+        "Customer GSTIN",
+        "Customer Type",
+        "Supply Type",
+        "Taxable Value",
+        "CGST",
+        "SGST",
+        "IGST",
+        "Total Tax",
+        "Invoice Total",
+        "Payment Mode",
+        "Paid",
+        "Balance",
+      ],
+      ...gstReportInvoices.map((invoice) => {
+        const total = Number(invoice.totals?.total || 0);
+        const pending = invoiceBalance(invoice);
+        const tax = Number(invoice.totals?.tax || 0);
+        const cgst = invoice.gstType === "interstate" ? 0 : tax / 2;
+        const sgst = invoice.gstType === "interstate" ? 0 : tax / 2;
+        const igst = invoice.gstType === "interstate" ? tax : 0;
+        return [
+          invoice.id,
+          new Date(invoice.date).toLocaleString("en-IN"),
+          invoice.customer?.name || "",
+          invoice.customer?.phone || "",
+          invoice.customer?.gstin || "Unregistered",
+          invoice.customer?.gstin ? "B2B" : "B2C",
+          invoice.gstType === "interstate" ? "IGST" : "CGST + SGST",
+          Number(invoice.totals?.taxable || 0).toFixed(2),
+          cgst.toFixed(2),
+          sgst.toFixed(2),
+          igst.toFixed(2),
+          tax.toFixed(2),
+          total.toFixed(2),
+          invoice.paymentMode,
+          Math.max(0, total - pending).toFixed(2),
+          pending.toFixed(2),
+        ];
+      }),
+      [],
+      ["HSN Summary"],
+      ["HSN", "GST Rate", "Quantity", "Taxable Value", "CGST", "SGST", "IGST", "Total Tax", "Total Value"],
+      ...gstHsnSummary.map((row) => [
+        row.hsnCode,
+        `${row.gstRate}%`,
+        row.qty,
+        row.taxable.toFixed(2),
+        row.cgst.toFixed(2),
+        row.sgst.toFixed(2),
+        row.igst.toFixed(2),
+        row.tax.toFixed(2),
+        row.total.toFixed(2),
+      ]),
+      [],
+      ["Invoice count", gstReportInvoices.length],
+      ["Taxable value", gstReportSummary.taxable.toFixed(2)],
+      ["CGST", gstReportSummary.cgst.toFixed(2)],
+      ["SGST", gstReportSummary.sgst.toFixed(2)],
+      ["IGST", gstReportSummary.igst.toFixed(2)],
+      ["Total tax", gstReportSummary.tax.toFixed(2)],
+      ["Invoice total", gstReportSummary.total.toFixed(2)],
+      ["Paid", gstReportSummary.paid.toFixed(2)],
+      ["Pending", gstReportSummary.pending.toFixed(2)],
+    ];
+    downloadCsv(`alter-gst-report-${gstReportStart}-to-${gstReportEnd}.csv`, rows);
   }
 
   function exportSalesReportCsv() {
@@ -2244,6 +2415,115 @@ function App() {
                   <div><span>Cost</span><strong>{money(rangeSalesSummary.cost)}</strong></div>
                   <div><span>Profit</span><strong>{money(rangeSalesSummary.netProfit)}</strong></div>
                 </div>
+              </section>
+              <section className="panel gst-report-panel">
+                <div className="panel-title">
+                  <div>
+                    <h2>GST report</h2>
+                    <span>{gstReportInvoices.length} GST invoices · {gstReportStart} to {gstReportEnd}</span>
+                  </div>
+                  <button className="secondary-button" type="button" onClick={exportGstReportCsv}>Export GST report</button>
+                </div>
+                <div className="sales-range-controls">
+                  <label>
+                    From
+                    <input type="date" value={gstReportStart} onChange={(event) => setGstReportStart(event.target.value)} />
+                  </label>
+                  <label>
+                    To
+                    <input type="date" value={gstReportEnd} onChange={(event) => setGstReportEnd(event.target.value)} />
+                  </label>
+                  <div className="panel-actions">
+                    <button className="quiet-button" type="button" onClick={() => setGstRangePreset("today")}>Today</button>
+                    <button className="quiet-button" type="button" onClick={() => setGstRangePreset("month")}>This month</button>
+                    <button className="quiet-button" type="button" onClick={() => setGstRangePreset("quarter")}>This quarter</button>
+                  </div>
+                </div>
+                <div className="sales-report-grid gst-report-summary-grid">
+                  <div><span>GST invoices</span><strong>{gstReportInvoices.length}</strong></div>
+                  <div><span>Taxable value</span><strong>{money(gstReportSummary.taxable)}</strong></div>
+                  <div><span>CGST</span><strong>{money(gstReportSummary.cgst)}</strong></div>
+                  <div><span>SGST</span><strong>{money(gstReportSummary.sgst)}</strong></div>
+                  <div><span>IGST</span><strong>{money(gstReportSummary.igst)}</strong></div>
+                  <div><span>Total tax</span><strong>{money(gstReportSummary.tax)}</strong></div>
+                  <div><span>Invoice total</span><strong>{money(gstReportSummary.total)}</strong></div>
+                  <div><span>Pending</span><strong>{money(gstReportSummary.pending)}</strong></div>
+                </div>
+                {gstReportInvoices.length ? (
+                  <>
+                    <div className="gst-report-table-wrap">
+                      <h3>HSN summary</h3>
+                      <table className="report-table">
+                        <thead>
+                          <tr>
+                            <th>HSN</th>
+                            <th>GST rate</th>
+                            <th>Qty</th>
+                            <th>Taxable</th>
+                            <th>CGST</th>
+                            <th>SGST</th>
+                            <th>IGST</th>
+                            <th>Total tax</th>
+                            <th>Total value</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {gstHsnSummary.map((row) => (
+                            <tr key={`${row.hsnCode}-${row.gstRate}`}>
+                              <td>{row.hsnCode}</td>
+                              <td>{row.gstRate}%</td>
+                              <td>{row.qty}</td>
+                              <td>{money(row.taxable)}</td>
+                              <td>{money(row.cgst)}</td>
+                              <td>{money(row.sgst)}</td>
+                              <td>{money(row.igst)}</td>
+                              <td>{money(row.tax)}</td>
+                              <td>{money(row.total)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="gst-report-table-wrap">
+                      <h3>GST invoice register</h3>
+                      <table className="report-table gst-invoice-register-table">
+                        <thead>
+                          <tr>
+                            <th>Invoice</th>
+                            <th>Date</th>
+                            <th>Customer</th>
+                            <th>GSTIN</th>
+                            <th>Supply</th>
+                            <th>Taxable</th>
+                            <th>Tax</th>
+                            <th>Total</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {gstReportInvoices.map((invoice) => {
+                            const pending = invoiceBalance(invoice);
+                            return (
+                              <tr key={invoice.id}>
+                                <td><strong>{invoice.id}</strong></td>
+                                <td>{new Date(invoice.date).toLocaleDateString("en-IN")}</td>
+                                <td>{invoice.customer?.name || "Walk-in customer"}</td>
+                                <td>{invoice.customer?.gstin || "B2C"}</td>
+                                <td>{invoice.gstType === "interstate" ? "IGST" : "CGST + SGST"}</td>
+                                <td>{money(invoice.totals?.taxable)}</td>
+                                <td>{money(invoice.totals?.tax)}</td>
+                                <td>{money(invoice.totals?.total)}</td>
+                                <td>{pending > 0 ? `Due ${money(pending)}` : "Paid"}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                ) : (
+                  <div className="empty-state">No GST invoices found in this date range.</div>
+                )}
               </section>
               <section className="panel sales-day-panel">
                 <div className="panel-title">
