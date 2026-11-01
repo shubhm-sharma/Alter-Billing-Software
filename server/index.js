@@ -40,6 +40,15 @@ const defaultDb = {
     firmAddress: "",
     firmGstin: "",
     firmStateCode: "",
+    shipFrom: {
+      name: "",
+      address: "",
+      gstin: "",
+      state: "",
+      stateCode: "",
+      phone: "",
+    },
+    shipToProfiles: [],
     upiId: "Q925031435@ybl",
     invoicePrefix: "ALT",
     receiptFooter: "Thank you for shopping with Alter",
@@ -47,6 +56,7 @@ const defaultDb = {
   products: [],
   customers: [],
   invoices: [],
+  challans: [],
   returns: [],
   whatsappMessages: [],
   whatsappWebhookLogs: [],
@@ -86,13 +96,23 @@ async function writeJsonDb(db) {
 }
 
 function normalizeDb(db = {}) {
+  const settings = {
+    ...defaultDb.settings,
+    ...(db.settings || {}),
+    shipFrom: {
+      ...defaultDb.settings.shipFrom,
+      ...(db.settings?.shipFrom || {}),
+    },
+    shipToProfiles: Array.isArray(db.settings?.shipToProfiles) ? db.settings.shipToProfiles : [],
+  };
   return {
     ...defaultDb,
     ...db,
-    settings: { ...defaultDb.settings, ...(db.settings || {}) },
+    settings,
     products: Array.isArray(db.products) ? db.products : [],
     customers: Array.isArray(db.customers) ? db.customers : [],
     invoices: Array.isArray(db.invoices) ? db.invoices : [],
+    challans: Array.isArray(db.challans) ? db.challans : [],
     returns: Array.isArray(db.returns) ? db.returns : [],
     whatsappMessages: Array.isArray(db.whatsappMessages) ? db.whatsappMessages : [],
     whatsappWebhookLogs: Array.isArray(db.whatsappWebhookLogs) ? db.whatsappWebhookLogs : [],
@@ -109,17 +129,18 @@ async function getMongoDb() {
 
 async function readMongoDb() {
   const db = await getMongoDb();
-  const [settings, products, customers, invoices, returns, whatsappMessages, whatsappWebhookLogs] = await Promise.all([
+  const [settings, products, customers, invoices, challans, returns, whatsappMessages, whatsappWebhookLogs] = await Promise.all([
     db.collection("settings").findOne({ id: "settings" }, { projection: { _id: 0 } }),
     db.collection("products").find({}, { projection: { _id: 0 } }).toArray(),
     db.collection("customers").find({}, { projection: { _id: 0 } }).toArray(),
     db.collection("invoices").find({}, { projection: { _id: 0 } }).toArray(),
+    db.collection("challans").find({}, { projection: { _id: 0 } }).sort({ createdAt: -1 }).toArray(),
     db.collection("returns").find({}, { projection: { _id: 0 } }).toArray(),
     db.collection("whatsappMessages").find({}, { projection: { _id: 0 } }).toArray(),
     db.collection("whatsappWebhookLogs").find({}, { projection: { _id: 0 } }).sort({ timestamp: -1 }).limit(50).toArray(),
   ]);
 
-  return normalizeDb({ settings, products, customers, invoices, returns, whatsappMessages, whatsappWebhookLogs });
+  return normalizeDb({ settings, products, customers, invoices, challans, returns, whatsappMessages, whatsappWebhookLogs });
 }
 
 async function writeMongoDb(appDb) {
@@ -129,6 +150,7 @@ async function writeMongoDb(appDb) {
     replaceMongoCollection(db, "products", normalized.products),
     replaceMongoCollection(db, "customers", normalized.customers),
     replaceMongoCollection(db, "invoices", normalized.invoices),
+    replaceMongoCollection(db, "challans", normalized.challans),
     replaceMongoCollection(db, "returns", normalized.returns),
     replaceMongoCollection(db, "whatsappMessages", normalized.whatsappMessages),
     replaceMongoCollection(db, "whatsappWebhookLogs", normalized.whatsappWebhookLogs),
@@ -165,6 +187,14 @@ async function returnId(db) {
     return `RET-${String(sequence).padStart(5, "0")}`;
   }
   return `RET-${String(db.returns.length + 1).padStart(5, "0")}`;
+}
+
+async function deliveryChallanId(db) {
+  if (mongoUri) {
+    const sequence = await nextMongoSequence("challan:DC", "challans", "DC");
+    return `DC-${String(sequence).padStart(5, "0")}`;
+  }
+  return `DC-${String(db.challans.length + 1).padStart(5, "0")}`;
 }
 
 async function nextMongoSequence(counterId, collectionName, prefix) {
@@ -977,6 +1007,12 @@ app.put("/api/customers/:key", async (req, res, next) => {
 app.put("/api/settings", async (req, res, next) => {
   try {
     const db = await readDb();
+    const incomingShipFrom = req.body.shipFrom && typeof req.body.shipFrom === "object"
+      ? req.body.shipFrom
+      : db.settings.shipFrom;
+    const incomingShipToProfiles = Array.isArray(req.body.shipToProfiles)
+      ? req.body.shipToProfiles
+      : db.settings.shipToProfiles;
     db.settings = {
       ...db.settings,
       shopName: String(req.body.shopName || "Alter").trim(),
@@ -988,12 +1024,105 @@ app.put("/api/settings", async (req, res, next) => {
       firmAddress: String(req.body.firmAddress || "").trim(),
       firmGstin: String(req.body.firmGstin || "").trim(),
       firmStateCode: String(req.body.firmStateCode || "").trim(),
+      shipFrom: {
+        name: String(incomingShipFrom.name || "").trim(),
+        address: String(incomingShipFrom.address || "").trim(),
+        gstin: String(incomingShipFrom.gstin || "").trim().toUpperCase(),
+        state: String(incomingShipFrom.state || "").trim(),
+        stateCode: String(incomingShipFrom.stateCode || "").trim(),
+        phone: String(incomingShipFrom.phone || "").trim(),
+      },
+      shipToProfiles: incomingShipToProfiles
+        .map((profile) => ({
+          id: String(profile.id || makeId("ship-to")).trim(),
+          name: String(profile.name || "").trim(),
+          careOf: String(profile.careOf || "").trim(),
+          address: String(profile.address || "").trim(),
+          gstin: String(profile.gstin || "").trim().toUpperCase(),
+          state: String(profile.state || "").trim(),
+          stateCode: String(profile.stateCode || "").trim(),
+          phone: String(profile.phone || "").trim(),
+        }))
+        .filter((profile) => profile.name || profile.address),
       upiId: String(req.body.upiId || "Q925031435@ybl").trim(),
       invoicePrefix: String(req.body.invoicePrefix || "ALT").trim().toUpperCase(),
       receiptFooter: String(req.body.receiptFooter || "").trim(),
     };
     await writeDb(db);
     res.json(db.settings);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/delivery-challans", async (req, res, next) => {
+  try {
+    const db = await readDb();
+    const items = Array.isArray(req.body.items) ? req.body.items : [];
+    if (!items.length) {
+      res.status(400).json({ error: "Add at least one item to the delivery challan." });
+      return;
+    }
+    const shipFrom = req.body.shipFrom && typeof req.body.shipFrom === "object" ? req.body.shipFrom : {};
+    const shipTo = req.body.shipTo && typeof req.body.shipTo === "object" ? req.body.shipTo : {};
+    if (!String(shipFrom.name || "").trim() || !String(shipFrom.address || "").trim()) {
+      res.status(400).json({ error: "Configure a ship-from name and address first." });
+      return;
+    }
+    if (!String(shipTo.name || "").trim() || !String(shipTo.address || "").trim()) {
+      res.status(400).json({ error: "Select a ship-to destination with a name and address." });
+      return;
+    }
+    const challanId = await deliveryChallanId(db);
+    const challan = {
+      id: challanId,
+      documentNumber: String(req.body.documentNumber || "").trim() || challanId,
+      shipmentId: String(req.body.shipmentId || "").trim(),
+      irnNumber: String(req.body.irnNumber || "").trim(),
+      date: invoiceDateFromInput(req.body.date),
+      purpose: String(req.body.purpose || "Stock transfer").trim(),
+      numberOfBoxes: Math.max(0, Number(req.body.numberOfBoxes) || 0),
+      placeOfSupply: String(req.body.placeOfSupply || shipFrom.state || "").trim(),
+      placeOfDelivery: String(req.body.placeOfDelivery || shipTo.state || "").trim(),
+      shipFrom: {
+        name: String(shipFrom.name || "").trim(),
+        address: String(shipFrom.address || "").trim(),
+        gstin: String(shipFrom.gstin || "").trim().toUpperCase(),
+        state: String(shipFrom.state || "").trim(),
+        stateCode: String(shipFrom.stateCode || "").trim(),
+        phone: String(shipFrom.phone || "").trim(),
+      },
+      shipTo: {
+        name: String(shipTo.name || "").trim(),
+        careOf: String(shipTo.careOf || "").trim(),
+        address: String(shipTo.address || "").trim(),
+        gstin: String(shipTo.gstin || "").trim().toUpperCase(),
+        state: String(shipTo.state || "").trim(),
+        stateCode: String(shipTo.stateCode || "").trim(),
+        phone: String(shipTo.phone || "").trim(),
+      },
+      items: items.map((item) => ({
+        name: String(item.name || "").trim(),
+        qty: Math.max(1, Number(item.qty) || 1),
+        unitValue: Math.max(0, Number(item.unitValue) || 0),
+        hsnCode: String(item.hsnCode || "").trim(),
+        taxableValue: Math.max(0, Number(item.taxableValue) || 0),
+        igstRate: Math.max(0, Number(item.igstRate) || 0),
+        igstValue: Math.max(0, Number(item.igstValue) || 0),
+        cessRate: Math.max(0, Number(item.cessRate) || 0),
+        cessValue: Math.max(0, Number(item.cessValue) || 0),
+        totalValue: Math.max(0, Number(item.totalValue) || 0),
+      })),
+      createdAt: new Date().toISOString(),
+    };
+    if (mongoUri) {
+      const mongoDb = await getMongoDb();
+      await mongoDb.collection("challans").insertOne(challan);
+    } else {
+      db.challans.push(challan);
+      await writeDb(db);
+    }
+    res.json(challan);
   } catch (error) {
     next(error);
   }

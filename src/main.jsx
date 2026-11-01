@@ -34,6 +34,14 @@ const emptyManualItem = {
   saveToCatalog: false,
   stock: "1",
 };
+const emptyChallanItem = {
+  name: "",
+  qty: "1",
+  unitValue: "",
+  hsnCode: "",
+  igstRate: "0",
+  cessRate: "0",
+};
 
 function formattedAmount(value) {
   return Number(value || 0).toLocaleString("en-IN", {
@@ -178,6 +186,10 @@ function applyPrintPage(invoiceType) {
     style.textContent = "@page { size: A4; margin: 10mm; }";
     return;
   }
+  if (invoiceType === "challan") {
+    style.textContent = "@page { size: A4 landscape; margin: 8mm; }";
+    return;
+  }
   if (invoiceType === "sticker") {
     style.textContent = "@page { size: 50mm 30mm; margin: 0; }";
     return;
@@ -239,6 +251,7 @@ function App() {
   const [stickerPrint, setStickerPrint] = useState(null);
   const [editingInvoiceId, setEditingInvoiceId] = useState("");
   const [salesPrint, setSalesPrint] = useState(null);
+  const [deliveryChallanPrint, setDeliveryChallanPrint] = useState(null);
   const [salesPrintDate, setSalesPrintDate] = useState(dateKey());
   const [salesReportStart, setSalesReportStart] = useState(monthStartKey());
   const [salesReportEnd, setSalesReportEnd] = useState(dateKey());
@@ -1268,6 +1281,16 @@ function App() {
     window.setTimeout(() => window.print(), 100);
   }
 
+  function printDeliveryChallan(challan) {
+    setLastInvoice(null);
+    setLastReturn(null);
+    setStickerPrint(null);
+    setSalesPrint(null);
+    setDeliveryChallanPrint({ ...challan, shop: state.settings });
+    applyPrintPage("challan");
+    window.setTimeout(() => window.print(), 100);
+  }
+
   function cancelInvoiceEdit() {
     setEditingInvoiceId("");
     setCustomer(emptyCustomer);
@@ -1590,6 +1613,7 @@ function App() {
     products: "Product barcodes",
     customers: "Customers",
     history: "Sales history",
+    challans: "Delivery challans",
     whatsapp: "WhatsApp inbox",
     returns: "Returns and exchanges",
     settings: "Settings",
@@ -1609,6 +1633,7 @@ function App() {
               ["products", "Products"],
               ["customers", "Customers"],
               ["history", "Sales"],
+              ["challans", "Challans"],
               ["whatsapp", "WhatsApp"],
               ["returns", "Returns"],
               ["settings", "Settings"],
@@ -2984,6 +3009,15 @@ function App() {
             </section>
           )}
 
+          {activeView === "challans" && (
+            <DeliveryChallanWorkspace
+              state={state}
+              onSaved={loadState}
+              onPrint={printDeliveryChallan}
+              onNotice={showNotice}
+            />
+          )}
+
           {activeView === "settings" && (
             <section className="settings-stack">
               <form className="panel" onSubmit={saveSettings}>
@@ -3036,6 +3070,7 @@ function App() {
                   </label>
                 </div>
               </form>
+              <DeliveryLocationsSettings settings={state.settings} onSaved={loadState} onNotice={showNotice} />
               <section className="panel">
                 <div className="panel-title">
                   <h2>Data tools</h2>
@@ -3161,7 +3196,13 @@ function App() {
         </div>
       )}
 
-      <PrintOutput invoice={lastInvoice} returnRecord={lastReturn} salesPrint={salesPrint} stickerPrint={stickerPrint} />
+      <PrintOutput
+        invoice={lastInvoice}
+        returnRecord={lastReturn}
+        salesPrint={salesPrint}
+        stickerPrint={stickerPrint}
+        deliveryChallanPrint={deliveryChallanPrint}
+      />
     </>
   );
 }
@@ -3305,8 +3346,359 @@ function ListPanel({ title, search, setSearch, placeholder, children }) {
   );
 }
 
-function PrintOutput({ invoice, returnRecord, salesPrint, stickerPrint }) {
+function DeliveryLocationsSettings({ settings, onSaved, onNotice }) {
+  const [shipFrom, setShipFrom] = useState(settings.shipFrom || {});
+  const [shipToProfiles, setShipToProfiles] = useState(settings.shipToProfiles || []);
+  const [shipToDraft, setShipToDraft] = useState({ name: "", careOf: "", address: "", gstin: "", state: "", stateCode: "", phone: "" });
+  const [editingId, setEditingId] = useState("");
+
+  useEffect(() => {
+    setShipFrom(settings.shipFrom || {});
+    setShipToProfiles(settings.shipToProfiles || []);
+  }, [settings]);
+
+  function updateShipFrom(field, value) {
+    setShipFrom((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateShipTo(field, value) {
+    setShipToDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function saveShipToProfile(event) {
+    event.preventDefault();
+    if (!shipToDraft.name.trim() || !shipToDraft.address.trim()) {
+      onNotice("Enter a destination name and address first");
+      return;
+    }
+    const profile = {
+      ...shipToDraft,
+      id: editingId || (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `ship-to-${Date.now()}`),
+    };
+    setShipToProfiles((current) => editingId ? current.map((item) => item.id === editingId ? profile : item) : [...current, profile]);
+    setShipToDraft({ name: "", careOf: "", address: "", gstin: "", state: "", stateCode: "", phone: "" });
+    setEditingId("");
+  }
+
+  function editShipToProfile(profile) {
+    setShipToDraft({ ...profile });
+    setEditingId(profile.id);
+  }
+
+  function removeShipToProfile(id) {
+    setShipToProfiles((current) => current.filter((profile) => profile.id !== id));
+    if (editingId === id) {
+      setEditingId("");
+      setShipToDraft({ name: "", careOf: "", address: "", gstin: "", state: "", stateCode: "", phone: "" });
+    }
+  }
+
+  async function saveLocations() {
+    try {
+      const saved = await api("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify({ ...settings, shipFrom, shipToProfiles }),
+      });
+      await onSaved();
+      setShipFrom(saved.shipFrom || shipFrom);
+      setShipToProfiles(saved.shipToProfiles || shipToProfiles);
+      onNotice("Delivery locations saved");
+    } catch (error) {
+      onNotice(error.message);
+    }
+  }
+
+  return (
+    <section className="panel delivery-locations-panel">
+      <div className="panel-title">
+        <div>
+          <h2>Delivery locations</h2>
+          <p className="panel-note">Save the regular ship-from and ship-to details used on delivery challans.</p>
+        </div>
+        <button className="secondary-button" type="button" onClick={saveLocations}>Save locations</button>
+      </div>
+      <h3 className="form-section-title">Ship from</h3>
+      <div className="field-grid">
+        {["name", "phone", "gstin", "state", "stateCode"].map((field) => (
+          <label key={field}>
+            {field === "gstin" ? "GSTIN" : field === "stateCode" ? "State code" : field.replace(/([A-Z])/g, " $1")}
+            <input value={shipFrom[field] || ""} onChange={(event) => updateShipFrom(field, event.target.value)} />
+          </label>
+        ))}
+        <label className="wide-field">
+          Address
+          <textarea rows="3" value={shipFrom.address || ""} onChange={(event) => updateShipFrom("address", event.target.value)} />
+        </label>
+      </div>
+      <h3 className="form-section-title">Saved ship-to destinations</h3>
+      <div className="saved-location-list">
+        {shipToProfiles.map((profile) => (
+          <article className="saved-location-card" key={profile.id}>
+            <div>
+              <strong>{profile.name}</strong>
+              {profile.careOf && <span>Care of {profile.careOf}</span>}
+              <span>{profile.address}</span>
+              <small>{[profile.gstin, profile.state, profile.phone].filter(Boolean).join(" · ") || "No extra details"}</small>
+            </div>
+            <div className="card-actions">
+              <button className="quiet-button" type="button" onClick={() => editShipToProfile(profile)}>Edit</button>
+              <button className="quiet-danger" type="button" onClick={() => removeShipToProfile(profile.id)}>Remove</button>
+            </div>
+          </article>
+        ))}
+        {!shipToProfiles.length && <div className="empty-state">Add a destination below to reuse it on future challans.</div>}
+      </div>
+      <form className="delivery-destination-editor" onSubmit={saveShipToProfile}>
+        <div className="panel-title">
+          <h3>{editingId ? "Edit destination" : "Add destination"}</h3>
+          {editingId && <button className="quiet-button" type="button" onClick={() => { setEditingId(""); setShipToDraft({ name: "", careOf: "", address: "", gstin: "", state: "", stateCode: "", phone: "" }); }}>Cancel edit</button>}
+        </div>
+        <div className="field-grid">
+          {["name", "careOf", "phone", "gstin", "state", "stateCode"].map((field) => (
+            <label key={field}>
+              {field === "careOf" ? "Care of" : field === "gstin" ? "GSTIN" : field === "stateCode" ? "State code" : field.replace(/([A-Z])/g, " $1")}
+              <input value={shipToDraft[field] || ""} onChange={(event) => updateShipTo(field, event.target.value)} />
+            </label>
+          ))}
+          <label className="wide-field">
+            Address
+            <textarea rows="3" value={shipToDraft.address} onChange={(event) => updateShipTo("address", event.target.value)} />
+          </label>
+        </div>
+        <button className="quiet-button" type="submit">{editingId ? "Update destination" : "Add destination"}</button>
+      </form>
+    </section>
+  );
+}
+
+function DeliveryChallanWorkspace({ state, onSaved, onPrint, onNotice }) {
+  const shipFrom = state.settings.shipFrom || {};
+  const shipToProfiles = state.settings.shipToProfiles || [];
+  const [form, setForm] = useState(() => ({
+    documentNumber: `DC-${String((state.challans || []).length + 1).padStart(5, "0")}`,
+    shipmentId: "",
+    irnNumber: "",
+    date: dateKey(),
+    purpose: "Stock transfer",
+    numberOfBoxes: "",
+    placeOfSupply: shipFrom.state || "",
+    placeOfDelivery: shipToProfiles[0]?.state || "",
+    shipToId: shipToProfiles[0]?.id || "",
+  }));
+  const [items, setItems] = useState([]);
+  const [productQuery, setProductQuery] = useState("");
+  const [manualItem, setManualItem] = useState(emptyChallanItem);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const selectedShipTo = shipToProfiles.find((profile) => profile.id === form.shipToId) || shipToProfiles[0];
+  const productResults = useMemo(() => {
+    const query = productQuery.trim().toLowerCase();
+    if (!query) return [];
+    return state.products.filter((product) => [product.name, product.barcode, product.sku, product.category].join(" ").toLowerCase().includes(query)).slice(0, 8);
+  }, [productQuery, state.products]);
+
+  const calculatedItems = items.map((item) => {
+    const qty = Math.max(1, Number(item.qty) || 1);
+    const unitValue = Math.max(0, Number(item.unitValue) || 0);
+    const taxableValue = qty * unitValue;
+    const igstRate = Math.max(0, Number(item.igstRate) || 0);
+    const cessRate = Math.max(0, Number(item.cessRate) || 0);
+    const igstValue = taxableValue * (igstRate / 100);
+    const cessValue = taxableValue * (cessRate / 100);
+    return { ...item, qty, unitValue, taxableValue, igstRate, igstValue, cessRate, cessValue, totalValue: taxableValue + igstValue + cessValue };
+  });
+  const challanTotals = calculatedItems.reduce((totals, item) => ({
+    taxable: totals.taxable + item.taxableValue,
+    igst: totals.igst + item.igstValue,
+    cess: totals.cess + item.cessValue,
+    total: totals.total + item.totalValue,
+  }), { taxable: 0, igst: 0, cess: 0, total: 0 });
+
+  function updateForm(field, value) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function addProduct(product) {
+    setItems((current) => [...current, { name: product.name, qty: "1", unitValue: product.price || "", hsnCode: product.hsnCode || "", igstRate: product.gstRate || "0", cessRate: "0" }]);
+    setProductQuery("");
+  }
+
+  function addManualItem() {
+    if (!manualItem.name.trim()) {
+      onNotice("Enter an item description first");
+      return;
+    }
+    setItems((current) => [...current, { ...manualItem }]);
+    setManualItem(emptyChallanItem);
+  }
+
+  function updateItem(index, field, value) {
+    setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item));
+  }
+
+  async function saveChallan(event) {
+    event.preventDefault();
+    if (!shipFrom.name?.trim() || !shipFrom.address?.trim()) {
+      onNotice("Configure the ship-from location in Settings first");
+      return;
+    }
+    if (!selectedShipTo?.name?.trim() || !selectedShipTo?.address?.trim()) {
+      onNotice("Add and select a ship-to destination first");
+      return;
+    }
+    if (!calculatedItems.length) {
+      onNotice("Add at least one item to the challan");
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const challan = await api("/api/delivery-challans", {
+        method: "POST",
+        body: JSON.stringify({ ...form, shipFrom, shipTo: selectedShipTo, items: calculatedItems }),
+      });
+      await onSaved();
+      onNotice(`${challan.documentNumber} saved`);
+      onPrint(challan);
+      setItems([]);
+      setForm((current) => ({ ...current, documentNumber: `DC-${String((state.challans || []).length + 2).padStart(5, "0")}`, shipmentId: "", irnNumber: "", numberOfBoxes: "" }));
+    } catch (error) {
+      onNotice(error.message);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <section className="challan-stack">
+      <form className="panel" onSubmit={saveChallan}>
+        <div className="panel-title">
+          <div>
+            <h2>Generate delivery challan</h2>
+            <p className="panel-note">Create a landscape challan with the same shipment and item structure as your reference document.</p>
+          </div>
+          <button className="primary-button challan-submit" type="submit" disabled={isSaving}>{isSaving ? "Saving..." : "Save and print challan"}</button>
+        </div>
+        <div className="challan-parties">
+          <div className="challan-party-card">
+            <span>Ship from</span>
+            <strong>{shipFrom.name || "Not configured"}</strong>
+            <p>{shipFrom.address || "Add this in Settings → Delivery locations"}</p>
+            <small>{[shipFrom.gstin, shipFrom.state, shipFrom.phone].filter(Boolean).join(" · ")}</small>
+          </div>
+          <div className="challan-party-card">
+            <label>
+              Ship to
+              <select value={form.shipToId} onChange={(event) => { updateForm("shipToId", event.target.value); const profile = shipToProfiles.find((item) => item.id === event.target.value); updateForm("placeOfDelivery", profile?.state || ""); }}>
+                <option value="">Select destination</option>
+                {shipToProfiles.map((profile) => <option value={profile.id} key={profile.id}>{profile.name}</option>)}
+              </select>
+            </label>
+            {selectedShipTo && <p>{selectedShipTo.address}<br />{[selectedShipTo.gstin, selectedShipTo.state, selectedShipTo.phone].filter(Boolean).join(" · ")}</p>}
+          </div>
+        </div>
+        <div className="field-grid challan-meta-form">
+          <label>Document number<input value={form.documentNumber} onChange={(event) => updateForm("documentNumber", event.target.value)} /></label>
+          <label>Document date<input type="date" value={form.date} onChange={(event) => updateForm("date", event.target.value)} /></label>
+          <label>FBA shipment ID<input value={form.shipmentId} onChange={(event) => updateForm("shipmentId", event.target.value)} /></label>
+          <label>IRN number (optional)<input value={form.irnNumber} onChange={(event) => updateForm("irnNumber", event.target.value)} /></label>
+          <label>Purpose of transfer<input value={form.purpose} onChange={(event) => updateForm("purpose", event.target.value)} /></label>
+          <label>Number of boxes<input min="0" type="number" value={form.numberOfBoxes} onChange={(event) => updateForm("numberOfBoxes", event.target.value)} /></label>
+          <label>Place of supply<input value={form.placeOfSupply} onChange={(event) => updateForm("placeOfSupply", event.target.value)} /></label>
+          <label>Place of delivery<input value={form.placeOfDelivery} onChange={(event) => updateForm("placeOfDelivery", event.target.value)} /></label>
+        </div>
+        <h3 className="form-section-title">Items</h3>
+        <label>
+          Add catalog product
+          <input value={productQuery} onChange={(event) => setProductQuery(event.target.value)} placeholder="Search by product name, barcode or SKU" />
+        </label>
+        {!!productResults.length && <div className="challan-product-results">{productResults.map((product) => <button className="product-result" type="button" key={product.id} onClick={() => addProduct(product)}><span><strong>{product.name}</strong><small>{product.barcode} · {money(product.price)}</small></span><b>Add</b></button>)}</div>}
+        <div className="challan-manual-row">
+          <input aria-label="Manual item description" placeholder="Manual item description" value={manualItem.name} onChange={(event) => setManualItem({ ...manualItem, name: event.target.value })} />
+          <input aria-label="Manual item quantity" min="1" type="number" value={manualItem.qty} onChange={(event) => setManualItem({ ...manualItem, qty: event.target.value })} />
+          <input aria-label="Manual item value" min="0" type="number" value={manualItem.unitValue} onChange={(event) => setManualItem({ ...manualItem, unitValue: event.target.value })} placeholder="Unit value" />
+          <input aria-label="Manual item HSN" value={manualItem.hsnCode} onChange={(event) => setManualItem({ ...manualItem, hsnCode: event.target.value })} placeholder="HSN" />
+          <button className="quiet-button" type="button" onClick={addManualItem}>Add item</button>
+        </div>
+        <div className="challan-items-table-wrap">
+          <table className="challan-items-table">
+            <thead><tr><th>#</th><th>Description</th><th>Qty</th><th>Unit value</th><th>HSN</th><th>IGST %</th><th>CESS %</th><th>Total</th><th /></tr></thead>
+            <tbody>
+              {calculatedItems.map((item, index) => <tr key={`${item.name}-${index}`}>
+                <td>{index + 1}</td>
+                <td><input value={item.name} onChange={(event) => updateItem(index, "name", event.target.value)} /></td>
+                <td><input min="1" type="number" value={item.qty} onChange={(event) => updateItem(index, "qty", event.target.value)} /></td>
+                <td><input min="0" type="number" value={item.unitValue} onChange={(event) => updateItem(index, "unitValue", event.target.value)} /></td>
+                <td><input value={item.hsnCode} onChange={(event) => updateItem(index, "hsnCode", event.target.value)} /></td>
+                <td><input min="0" type="number" value={item.igstRate} onChange={(event) => updateItem(index, "igstRate", event.target.value)} /></td>
+                <td><input min="0" type="number" value={item.cessRate} onChange={(event) => updateItem(index, "cessRate", event.target.value)} /></td>
+                <td>{money(item.totalValue)}</td>
+                <td><button className="quiet-danger" type="button" onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>Remove</button></td>
+              </tr>)}
+              {!calculatedItems.length && <tr><td colSpan="9" className="empty-state">Add products or a manual item to begin.</td></tr>}
+            </tbody>
+            <tfoot><tr><th colSpan="7">Totals</th><th>{money(challanTotals.total)}</th><th /></tr></tfoot>
+          </table>
+        </div>
+      </form>
+      <section className="panel">
+        <div className="panel-title"><h2>Saved delivery challans</h2><span>{(state.challans || []).length} records</span></div>
+        <div className="data-list challan-history-list">
+          {(state.challans || []).slice().reverse().map((challan) => <article className="data-card" key={challan.id}>
+            <div><strong>{challan.documentNumber}</strong><span>{new Date(challan.date).toLocaleDateString("en-IN")} · {challan.shipTo?.name || "Destination"} · {challan.items?.length || 0} items</span></div>
+            <b>{money((challan.items || []).reduce((sum, item) => sum + Number(item.totalValue || 0), 0))}</b>
+            <button type="button" onClick={() => onPrint({ ...challan, shop: state.settings })}>Print</button>
+          </article>)}
+          {!(state.challans || []).length && <div className="empty-state">No delivery challans created yet.</div>}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function DeliveryChallanPrint({ report }) {
+  const shipFrom = report.shipFrom || {};
+  const shipTo = report.shipTo || {};
+  const items = report.items || [];
+  const totals = items.reduce((summary, item) => ({
+    taxable: summary.taxable + Number(item.taxableValue || 0),
+    igst: summary.igst + Number(item.igstValue || 0),
+    cess: summary.cess + Number(item.cessValue || 0),
+    total: summary.total + Number(item.totalValue || 0),
+  }), { taxable: 0, igst: 0, cess: 0, total: 0 });
+  const displayDate = new Date(report.date).toLocaleDateString("en-IN");
+
+  return (
+    <section className="print-output challan-print" aria-hidden="true">
+      <article className="delivery-challan-page">
+        <header className="challan-header"><strong>{report.shop?.shopName || "Alter"}</strong><h1>DELIVERY CHALLAN/ TAX INVOICE</h1><span>{report.documentNumber}</span></header>
+        <section className="challan-party-grid">
+          <div><strong>Ship from</strong><b>{shipFrom.name}</b><p>{shipFrom.address}</p><p>{[shipFrom.gstin && `GSTIN: ${shipFrom.gstin}`, shipFrom.state && `State: ${shipFrom.state}`, shipFrom.phone && `Phone: ${shipFrom.phone}`].filter(Boolean).join(" · ")}</p></div>
+          <div><strong>Ship to / Care of</strong><b>{shipTo.name}</b>{shipTo.careOf && <p>Care of: {shipTo.careOf}</p>}<p>{shipTo.address}</p><p>{[shipTo.gstin && `GSTIN: ${shipTo.gstin}`, shipTo.state && `State: ${shipTo.state}`, shipTo.phone && `Phone: ${shipTo.phone}`].filter(Boolean).join(" · ")}</p></div>
+        </section>
+        <section className="challan-meta-grid">
+          <div><p><b>Place of supply</b><span>{report.placeOfSupply || "-"}</span></p><p><b>Place of delivery</b><span>{report.placeOfDelivery || "-"}</span></p><p><b>Purpose of transfer</b><span>{report.purpose || "-"}</span></p></div>
+          <div><p><b>Document number</b><span>{report.documentNumber}</span></p><p><b>FBA Shipment ID</b><span>{report.shipmentId || "-"}</span></p><p><b>Document date</b><span>{displayDate}</span></p></div>
+          <div><p><b>IRN number</b><span>{report.irnNumber || "Optional"}</span></p><p><b>Number of boxes</b><span>{report.numberOfBoxes || "-"}</span></p></div>
+        </section>
+        <table className="challan-print-table"><thead><tr><th>Sno</th><th>Product Description</th><th>Qty</th><th>Unit Value (INR)</th><th>HSN / SAC Code</th><th>Total Taxable Value (INR)</th><th>IGST Rate (%)</th><th>IGST Value (INR)</th><th>CESS Rate (%)</th><th>CESS Value (INR)</th><th>Total Value (Inclusive of tax) (INR)</th></tr></thead><tbody>
+          {items.map((item, index) => <tr key={`${item.name}-${index}`}><td>{index + 1}</td><td>{item.name}</td><td>{item.qty}</td><td>{formattedAmount(item.unitValue)}</td><td>{item.hsnCode || "-"}</td><td>{formattedAmount(item.taxableValue)}</td><td>{item.igstRate}%</td><td>{formattedAmount(item.igstValue)}</td><td>{item.cessRate}%</td><td>{formattedAmount(item.cessValue)}</td><td>{formattedAmount(item.totalValue)}</td></tr>)}
+          {Array.from({ length: Math.max(0, 5 - items.length) }, (_, index) => <tr key={`blank-${index}`}><td>{items.length + index + 1}</td><td /><td /><td /><td /><td /><td /><td /><td /><td /><td /></tr>)}
+        </tbody><tfoot><tr><th colSpan="5">Totals</th><th>{formattedAmount(totals.taxable)}</th><th /><th>{formattedAmount(totals.igst)}</th><th /><th>{formattedAmount(totals.cess)}</th><th>{formattedAmount(totals.total)}</th></tr></tfoot></table>
+        <div className="challan-amount-words">Total value including tax: <strong>{money(totals.total)}</strong></div>
+      </article>
+      <article className="delivery-challan-page challan-declaration-page">
+        <h2>Declaration</h2>
+        <p>1. Goods are being moved from the ship-from premises for the purpose of transfer mentioned above.</p>
+        <p>2. The details mentioned above are true and correct to the best of our knowledge.</p>
+        <div className="challan-signature"><span>Place: {report.placeOfSupply || "-"}</span><span>Date: {displayDate}</span><strong>For {shipFrom.name || report.shop?.shopName || "Alter"}</strong><span>Authorised signatory</span></div>
+      </article>
+    </section>
+  );
+}
+
+function PrintOutput({ invoice, returnRecord, salesPrint, stickerPrint, deliveryChallanPrint }) {
   if (stickerPrint) return <ProductStickerPrint product={stickerPrint.product} quantity={stickerPrint.quantity} />;
+  if (deliveryChallanPrint) return <DeliveryChallanPrint report={deliveryChallanPrint} />;
   if (salesPrint) return <DaySalesReceipt report={salesPrint} />;
   if (returnRecord) return <ReturnSlip record={returnRecord} />;
   if (!invoice) return <section className="print-output" aria-hidden="true" />;

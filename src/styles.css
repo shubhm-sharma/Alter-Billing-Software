@@ -1554,6 +1554,175 @@ textarea:focus {
   display: none;
 }
 
+.challan-stack {
+  display: grid;
+  gap: 20px;
+}
+
+.challan-submit {
+  min-width: 190px;
+}
+
+.challan-parties {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.challan-party-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafb;
+}
+
+.challan-party-card > span {
+  color: var(--forest);
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.challan-party-card p,
+.challan-party-card small {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.challan-meta-form {
+  margin-top: 16px;
+}
+
+.challan-product-results {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.challan-product-results .product-result {
+  margin: 0;
+}
+
+.challan-manual-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) 78px minmax(120px, 1fr) 110px auto;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.challan-items-table-wrap {
+  margin-top: 16px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.challan-items-table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.challan-items-table th,
+.challan-items-table td {
+  padding: 9px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.challan-items-table th {
+  color: var(--forest);
+  background: #f8fafb;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.challan-items-table input {
+  min-height: 36px;
+  padding: 7px;
+}
+
+.challan-items-table td:nth-child(1),
+.challan-items-table th:nth-child(1) {
+  width: 42px;
+  text-align: center;
+}
+
+.challan-items-table td:nth-child(8),
+.challan-items-table th:nth-child(8),
+.challan-items-table tfoot th:nth-child(2) {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.challan-items-table tfoot th {
+  color: var(--ink);
+  background: #ffffff;
+  text-transform: none;
+}
+
+.saved-location-list {
+  display: grid;
+  gap: 10px;
+}
+
+.saved-location-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.saved-location-card > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.saved-location-card span,
+.saved-location-card small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.delivery-destination-editor {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafb;
+}
+
+.delivery-destination-editor .panel-title {
+  margin-bottom: 0;
+}
+
+.delivery-destination-editor h3 {
+  margin: 0;
+  color: var(--forest);
+  font-size: 16px;
+}
+
+.challan-history-list .data-card {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.challan-history-list .data-card b {
+  white-space: nowrap;
+}
+
 @media (max-width: 1040px) {
   .app-shell,
   .billing-grid,
@@ -1611,6 +1780,10 @@ textarea:focus {
 
   .sales-report-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .challan-parties {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1680,7 +1853,8 @@ textarea:focus {
   .sales-report-grid,
   .sales-range-controls,
   .sales-day-controls,
-  .pending-invoice-row {
+  .pending-invoice-row,
+  .challan-manual-row {
     grid-template-columns: 1fr;
   }
 
@@ -1726,6 +1900,15 @@ textarea:focus {
 
   .manual-item-actions .primary-button {
     width: 100%;
+  }
+
+  .saved-location-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .challan-history-list .data-card {
+    grid-template-columns: 1fr;
   }
 
   .topbar {
@@ -1854,6 +2037,197 @@ textarea:focus {
     height: 11.8mm;
     transform: translate(-50%, -50%) rotate(-90deg);
     transform-origin: center;
+  }
+
+  .challan-print {
+    width: 100%;
+    color: #000000;
+    font-family: Arial, sans-serif;
+  }
+
+  .delivery-challan-page {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 175mm;
+    padding: 5mm;
+    border: 1px solid #000000;
+    page-break-after: always;
+    break-after: page;
+    color: #000000;
+    font-size: 8px;
+  }
+
+  .delivery-challan-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  .challan-header {
+    display: grid;
+    grid-template-columns: 1fr 2fr 1fr;
+    align-items: center;
+    gap: 4mm;
+    padding-bottom: 3mm;
+    border-bottom: 1px solid #000000;
+    text-align: center;
+  }
+
+  .challan-header strong,
+  .challan-header span {
+    text-align: left;
+    font-size: 9px;
+  }
+
+  .challan-header span {
+    text-align: right;
+  }
+
+  .challan-header h1 {
+    margin: 0;
+    font-size: 13px;
+  }
+
+  .challan-party-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-bottom: 1px solid #000000;
+  }
+
+  .challan-party-grid > div {
+    min-height: 28mm;
+    padding: 3mm;
+  }
+
+  .challan-party-grid > div + div {
+    border-left: 1px solid #000000;
+  }
+
+  .challan-party-grid strong,
+  .challan-party-grid b,
+  .challan-party-grid p {
+    display: block;
+    margin: 0 0 1.3mm;
+  }
+
+  .challan-party-grid strong {
+    font-size: 9px;
+    text-transform: uppercase;
+  }
+
+  .challan-party-grid p {
+    line-height: 1.3;
+  }
+
+  .challan-meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    border-bottom: 1px solid #000000;
+  }
+
+  .challan-meta-grid > div {
+    padding: 2.5mm 3mm;
+  }
+
+  .challan-meta-grid > div + div {
+    border-left: 1px solid #000000;
+  }
+
+  .challan-meta-grid p {
+    display: flex;
+    justify-content: space-between;
+    gap: 3mm;
+    margin: 0 0 1.2mm;
+  }
+
+  .challan-meta-grid span {
+    text-align: right;
+  }
+
+  .challan-print-table {
+    width: 100%;
+    margin-top: 4mm;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 7px;
+  }
+
+  .challan-print-table th,
+  .challan-print-table td {
+    padding: 1.4mm 0.9mm;
+    border: 1px solid #000000;
+    text-align: right;
+    vertical-align: middle;
+    overflow-wrap: anywhere;
+  }
+
+  .challan-print-table th:nth-child(1),
+  .challan-print-table td:nth-child(1) { width: 4%; text-align: center; }
+  .challan-print-table th:nth-child(2),
+  .challan-print-table td:nth-child(2) { width: 19%; text-align: left; }
+  .challan-print-table th:nth-child(3),
+  .challan-print-table td:nth-child(3) { width: 5%; text-align: center; }
+  .challan-print-table th:nth-child(4),
+  .challan-print-table td:nth-child(4) { width: 8%; }
+  .challan-print-table th:nth-child(5),
+  .challan-print-table td:nth-child(5) { width: 9%; }
+  .challan-print-table th:nth-child(6),
+  .challan-print-table td:nth-child(6) { width: 11%; }
+  .challan-print-table th:nth-child(7),
+  .challan-print-table td:nth-child(7) { width: 7%; }
+  .challan-print-table th:nth-child(8),
+  .challan-print-table td:nth-child(8) { width: 9%; }
+  .challan-print-table th:nth-child(9),
+  .challan-print-table td:nth-child(9) { width: 7%; }
+  .challan-print-table th:nth-child(10),
+  .challan-print-table td:nth-child(10) { width: 9%; }
+  .challan-print-table th:nth-child(11),
+  .challan-print-table td:nth-child(11) { width: 12%; }
+
+  .challan-print-table thead th {
+    height: 13mm;
+    font-size: 6.5px;
+    text-align: center;
+  }
+
+  .challan-print-table tbody tr {
+    height: 10mm;
+  }
+
+  .challan-print-table tfoot th {
+    font-size: 7px;
+  }
+
+  .challan-amount-words {
+    margin-top: 4mm;
+    padding-top: 2mm;
+    border-top: 1px solid #000000;
+    text-align: right;
+  }
+
+  .challan-declaration-page {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .challan-declaration-page h2 {
+    margin: 0 0 8mm;
+    font-size: 13px;
+  }
+
+  .challan-declaration-page p {
+    margin: 0 0 5mm;
+    font-size: 10px;
+  }
+
+  .challan-signature {
+    display: grid;
+    gap: 3mm;
+    width: 65mm;
+    margin-top: auto;
+    margin-left: auto;
+    padding-top: 22mm;
+    border-top: 1px solid #000000;
+    text-align: center;
   }
 
   .receipt {
